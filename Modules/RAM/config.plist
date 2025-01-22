@@ -6,6 +6,8 @@
 	<string>RAM</string>
 	<key>State</key>
 	<true/>
+	<key>Symbol</key>
+	<string>memorychip</string>
 	<key>Widgets</key>
 	<dict>
 		<key>label</key>
@@ -90,6 +92,20 @@
 			<key>Order</key>
 			<integer>6</integer>
 		</dict>
+		<key>text</key>
+		<dict>
+			<key>Default</key>
+			<false/>
+			<key>Order</key>
+			<integer>7</integer>
+		</dict>
+	</dict>
+	<key>Settings</key>
+	<dict>
+		<key>popup</key>
+		<true/>
+		<key>notifications</key>
+		<true/>
 	</dict>
 </dict>
 </plist>

@@ -8,7 +8,6 @@
 //
 //  Copyright © 2020 Serhiy Mytrovtsiy. All rights reserved.
 //
-// swiftlint:disable control_statement
 
 import Cocoa
 import Kit
@@ -21,7 +20,8 @@ struct ipResponse: Decodable {
     var cc: String
 }
 
-extension CWPHYMode: CustomStringConvertible {
+// swiftlint:disable control_statement
+extension CWPHYMode: @retroactive CustomStringConvertible {
     public var description: String {
         switch(self) {
         case .mode11a:  return "802.11a"
@@ -36,7 +36,7 @@ extension CWPHYMode: CustomStringConvertible {
     }
 }
 
-extension CWInterfaceMode: CustomStringConvertible {
+extension CWInterfaceMode: @retroactive CustomStringConvertible {
     public var description: String {
         switch(self) {
         case .hostAP:       return "AP"
@@ -48,7 +48,7 @@ extension CWInterfaceMode: CustomStringConvertible {
     }
 }
 
-extension CWSecurity: CustomStringConvertible {
+extension CWSecurity: @retroactive CustomStringConvertible {
     public var description: String {
         switch(self) {
         case .none:               return "none"
@@ -71,18 +71,19 @@ extension CWSecurity: CustomStringConvertible {
     }
 }
 
-extension CWChannelBand: CustomStringConvertible {
+extension CWChannelBand: @retroactive CustomStringConvertible {
     public var description: String {
         switch(self) {
         case .band2GHz:     return "2 GHz"
-        case .band5GHz:     return "5 Ghz"
+        case .band5GHz:     return "5 GHz"
+        case .band6GHz:     return "6 GHz"
         case .bandUnknown:  return "unknown"
         @unknown default:   return "unknown"
         }
     }
 }
 
-extension CWChannelWidth: CustomStringConvertible {
+extension CWChannelWidth: @retroactive CustomStringConvertible {
     public var description: String {
         switch(self) {
         case .width20MHz:   return "20 MHz"
@@ -94,6 +95,7 @@ extension CWChannelWidth: CustomStringConvertible {
         }
     }
 }
+// swiftlint:enable control_statement
 
 extension CWChannel {
     override public var description: String {
@@ -101,17 +103,13 @@ extension CWChannel {
     }
 }
 
-internal class UsageReader: Reader<Network_Usage> {
+internal class UsageReader: Reader<Network_Usage>, CWEventDelegate {
     private var reachability: Reachability = Reachability(start: true)
     private let variablesQueue = DispatchQueue(label: "eu.exelban.NetworkUsageReader")
     private var _usage: Network_Usage = Network_Usage()
     public var usage: Network_Usage {
-        get {
-            self.variablesQueue.sync { self._usage }
-        }
-        set {
-            self.variablesQueue.sync { self._usage = newValue }
-        }
+        get { self.variablesQueue.sync { self._usage } }
+        set { self.variablesQueue.sync { self._usage = newValue } }
     }
     
     private var primaryInterface: String {
@@ -124,18 +122,12 @@ internal class UsageReader: Reader<Network_Usage> {
     }
     
     private var interfaceID: String {
-        get {
-            return Store.shared.string(key: "Network_interface", defaultValue: self.primaryInterface) 
-        }
-        set {
-            Store.shared.set(key: "Network_interface", value: newValue)
-        }
+        get { Store.shared.string(key: "Network_interface", defaultValue: self.primaryInterface) }
+        set { Store.shared.set(key: "Network_interface", value: newValue) }
     }
     
     private var reader: String {
-        get {
-            return Store.shared.string(key: "Network_reader", defaultValue: "interface") 
-        }
+        get { Store.shared.string(key: "Network_reader", defaultValue: "interface") }
     }
     
     private var vpnConnection: Bool {
@@ -146,19 +138,22 @@ internal class UsageReader: Reader<Network_Usage> {
     }
     
     private var VPNMode: Bool {
-        get {
-            return Store.shared.bool(key: "Network_VPNMode", defaultValue: false)
-        }
+        get { Store.shared.bool(key: "Network_VPNMode", defaultValue: false) }
     }
+    
+    private let wifiClient = CWWiFiClient.shared()
     
     public override func setup() {
         self.reachability.reachable = {
             if self.active {
+                self.getPublicIP()
                 self.getDetails()
+                self.getWiFiDetails()
             }
         }
         self.reachability.unreachable = {
             if self.active {
+                self.getWiFiDetails()
                 self.usage.reset()
                 self.callback(self.usage)
             }
@@ -169,16 +164,28 @@ internal class UsageReader: Reader<Network_Usage> {
         
         DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1) {
             if self.active {
+                self.getPublicIP()
                 self.getDetails()
             }
         }
+        
+        if let usage = self.value {
+            self.usage = usage
+            self.usage.bandwidth = Bandwidth()
+        }
+        
+        self.wifiClient.delegate = self
+        self.startListeningForWifiEvents()
     }
     
     public override func terminate() {
         self.reachability.stop()
+        self.stopListeningForWifiEvents()
     }
     
     public override func read() {
+        self.getDetails()
+        
         let current: Bandwidth = self.reader == "interface" ? self.readInterfaceBandwidth() : self.readProcessBandwidth()
         
         // allows to reset the value to 0 when first read
@@ -213,7 +220,7 @@ internal class UsageReader: Reader<Network_Usage> {
         var totalUpload: Int64 = 0
         var totalDownload: Int64 = 0
         guard getifaddrs(&interfaceAddresses) == 0 else {
-            return (0, 0)
+            return Bandwidth()
         }
         
         var pointer = interfaceAddresses
@@ -235,22 +242,29 @@ internal class UsageReader: Reader<Network_Usage> {
         }
         freeifaddrs(interfaceAddresses)
         
-        return (totalUpload, totalDownload)
+        return Bandwidth(upload: totalUpload, download: totalDownload)
     }
     
     private func readProcessBandwidth() -> Bandwidth {
         let task = Process()
         task.launchPath = "/usr/bin/nettop"
         task.arguments = ["-P", "-L", "1", "-n", "-k", "time,interface,state,rx_dupe,rx_ooo,re-tx,rtt_avg,rcvsize,tx_win,tc_class,tc_mgt,cc_algo,P,C,R,W,arch"]
+        task.environment = [
+            "NSUnbufferedIO": "YES",
+            "LC_ALL": "en_US.UTF-8"
+        ]
         
+        let inputPipe = Pipe()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         
         defer {
+            inputPipe.fileHandleForWriting.closeFile()
             outputPipe.fileHandleForReading.closeFile()
             errorPipe.fileHandleForReading.closeFile()
         }
         
+        task.standardInput = inputPipe
         task.standardOutput = outputPipe
         task.standardError = errorPipe
         
@@ -258,22 +272,19 @@ internal class UsageReader: Reader<Network_Usage> {
             try task.run()
         } catch let err {
             error("read bandwidth from processes: \(err)", log: self.log)
-            return (0, 0)
+            return Bandwidth()
         }
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: outputData, as: UTF8.self)
-        _ = String(decoding: errorData, as: UTF8.self)
-        
-        if output.isEmpty {
-            return (0, 0)
-        }
+        let output = String(data: outputData, encoding: .utf8)
+        _ = String(data: errorData, encoding: .utf8)
+        guard let output, !output.isEmpty else { return Bandwidth() }
 
         var totalUpload: Int64 = 0
         var totalDownload: Int64 = 0
         var firstLine = false
-        output.enumerateLines { (line, _) -> Void in
+        output.enumerateLines { (line, _) in
             if !firstLine {
                 firstLine = true
                 return
@@ -292,19 +303,11 @@ internal class UsageReader: Reader<Network_Usage> {
             }
         }
         
-        return (totalUpload, totalDownload)
+        return Bandwidth(upload: totalUpload, download: totalDownload)
     }
     
     public func getDetails() {
-        self.usage.reset()
-        
-        DispatchQueue.global(qos: .background).async {
-            self.getPublicIP()
-        }
-        
-        guard self.interfaceID != "" else {
-            return
-        }
+        guard self.interfaceID != "" else { return }
         
         for interface in SCNetworkInterfaceCopyAll() as NSArray {
             if let bsdName = SCNetworkInterfaceGetBSDName(interface as! SCNetworkInterface), bsdName as String == self.interfaceID,
@@ -326,14 +329,28 @@ internal class UsageReader: Reader<Network_Usage> {
             }
         }
         
-        if let interface = CWWiFiClient.shared().interface(withName: self.interfaceID), self.usage.connectionType == .wifi {
-            self.usage.wifiDetails.ssid = interface.ssid()
-            self.usage.wifiDetails.countryCode = interface.countryCode()
+        guard self.usage.interface != nil else { return }
+        
+        if self.usage.connectionType == .wifi && self.usage.wifiDetails.ssid == nil || self.usage.wifiDetails.ssid == "" {
+            self.getWiFiDetails()
+        }
+    }
+    
+    private func getWiFiDetails() {
+        if let interface = CWWiFiClient.shared().interface(withName: self.interfaceID) {
+            if let ssid = interface.ssid() {
+                self.usage.wifiDetails.ssid = ssid
+            }
+            if let bssid = interface.bssid() {
+                self.usage.wifiDetails.bssid = bssid
+            }
+            if let cc = interface.countryCode() {
+                self.usage.wifiDetails.countryCode = cc
+            }
             
             self.usage.wifiDetails.RSSI = interface.rssiValue()
             self.usage.wifiDetails.noise = interface.noiseMeasurement()
             self.usage.wifiDetails.transmitRate = interface.transmitRate()
-            self.usage.wifiDetails.transmitPower = interface.transmitPower()
             
             self.usage.wifiDetails.standard = interface.activePHYMode().description
             self.usage.wifiDetails.mode = interface.interfaceMode().description
@@ -345,6 +362,39 @@ internal class UsageReader: Reader<Network_Usage> {
                 self.usage.wifiDetails.channelBand = ch.channelBand.description
                 self.usage.wifiDetails.channelWidth = ch.channelWidth.description
                 self.usage.wifiDetails.channelNumber = ch.channelNumber.description
+            }
+        }
+        
+        if self.usage.wifiDetails.ssid == nil || self.usage.wifiDetails.ssid == "" {
+            if #available(macOS 15, *) {
+                guard let res = process(path: "/usr/sbin/system_profiler", arguments: ["SPAirPortDataType", "-json"]) else {
+                    return
+                }
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: Data(res.utf8), options: []) as? [String: Any] {
+                        if let arr = json["SPAirPortDataType"] as? [[String: Any]],
+                           let airport = arr.first(where: { $0["spairport_airport_interfaces"] != nil }),
+                           let interfaces = airport["spairport_airport_interfaces"] as? [[String: Any]],
+                           let interface = interfaces.first(where: { $0["_name"] as? String == self.interfaceID }),
+                           let obj = interface["spairport_current_network_information"] as? [String: Any] {
+                            
+                            self.usage.wifiDetails.ssid = obj["_name"] as? String
+                            self.usage.wifiDetails.countryCode = obj["spairport_network_country_code"] as? String
+                            self.usage.wifiDetails.standard = obj["spairport_network_phymode"] as? String
+                        }
+                    }
+                } catch let err as NSError {
+                    error("error to parse system_profiler SPAirPortDataType: \(err.localizedDescription)")
+                    return
+                }
+            } else {
+                let networksetupResponse = syncShell("networksetup -getairportnetwork \(self.interfaceID)")
+                if networksetupResponse.split(separator: "\n").count == 1 {
+                    let arr = networksetupResponse.split(separator: ":")
+                    if let ssid = arr.last {
+                        self.usage.wifiDetails.ssid = ssid.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                    }
+                }
             }
         }
     }
@@ -369,7 +419,7 @@ internal class UsageReader: Reader<Network_Usage> {
         }
         
         DispatchQueue.global(qos: .userInitiated).async {
-            let response = syncShell("curl -s -4 https://api.serhiy.io/v1/stats/ip")
+            let response = syncShell("curl -s -4 https://api.mac-stats.com/ip")
             if !response.isEmpty, let data = response.data(using: .utf8),
                let addr = try? JSONDecoder().decode(Addr_s.self, from: data) {
                 if let ip = addr.ipv4, self.isIPv4(ip) {
@@ -378,7 +428,7 @@ internal class UsageReader: Reader<Network_Usage> {
             }
         }
         DispatchQueue.global(qos: .userInitiated).async {
-            let response = syncShell("curl -s -6 https://api.serhiy.io/v1/stats/ip")
+            let response = syncShell("curl -s -6 https://api.mac-stats.com/ip")
             if !response.isEmpty, let data = response.data(using: .utf8),
                let addr = try? JSONDecoder().decode(Addr_s.self, from: data) {
                 if let ip = addr.ipv6, !self.isIPv4(ip) {
@@ -414,7 +464,28 @@ internal class UsageReader: Reader<Network_Usage> {
     }
     
     @objc func resetTotalNetworkUsage() {
-        self.usage.total = (0, 0)
+        self.usage.total = Bandwidth()
+        self.save(self.usage)
+    }
+    
+    private func startListeningForWifiEvents() {
+        do {
+            try self.wifiClient.startMonitoringEvent(with: .ssidDidChange)
+        } catch let err as NSError {
+            error("failed to start monitoring Wi-Fi events: \(err.localizedDescription)")
+        }
+    }
+    
+    private func stopListeningForWifiEvents() {
+        do {
+            try self.wifiClient.stopMonitoringEvent(with: .ssidDidChange)
+        } catch let err as NSError {
+            error("failed to stop monitoring Wi-Fi events: \(err.localizedDescription)")
+        }
+    }
+    
+    func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
+        self.getWiFiDetails()
     }
 }
 
@@ -440,15 +511,22 @@ public class ProcessReader: Reader<[Network_Process]> {
         let task = Process()
         task.launchPath = "/usr/bin/nettop"
         task.arguments = ["-P", "-L", "1", "-n", "-k", "time,interface,state,rx_dupe,rx_ooo,re-tx,rtt_avg,rcvsize,tx_win,tc_class,tc_mgt,cc_algo,P,C,R,W,arch"]
+        task.environment = [
+            "NSUnbufferedIO": "YES",
+            "LC_ALL": "en_US.UTF-8"
+        ]
         
+        let inputPipe = Pipe()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         
         defer {
+            inputPipe.fileHandleForWriting.closeFile()
             outputPipe.fileHandleForReading.closeFile()
             errorPipe.fileHandleForReading.closeFile()
         }
         
+        task.standardInput = inputPipe
         task.standardOutput = outputPipe
         task.standardError = errorPipe
         
@@ -461,16 +539,13 @@ public class ProcessReader: Reader<[Network_Process]> {
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: outputData, as: UTF8.self)
-        _ = String(decoding: errorData, as: UTF8.self)
-        
-        if output.isEmpty {
-            return
-        }
+        let output = String(data: outputData, encoding: .utf8)
+        _ = String(data: errorData, encoding: .utf8)
+        guard let output, !output.isEmpty else { return }
         
         var list: [Network_Process] = []
         var firstLine = false
-        output.enumerateLines { (line, _) -> Void in
+        output.enumerateLines { (line, _) in
             if !firstLine {
                 firstLine = true
                 return
@@ -486,18 +561,16 @@ public class ProcessReader: Reader<[Network_Process]> {
             
             let nameArray = parsedLine[0].split(separator: ".")
             if let pid = nameArray.last {
-                process.pid = String(pid)
+                process.pid = Int(pid) ?? 0
             }
-            if let app = NSRunningApplication(processIdentifier: pid_t(process.pid) ?? 0) {
+            if let app = NSRunningApplication(processIdentifier: pid_t(process.pid) ) {
                 process.name = app.localizedName ?? nameArray.dropLast().joined(separator: ".")
-                process.icon = app.icon != nil ? app.icon : Constants.defaultProcessIcon
             } else {
                 process.name = nameArray.dropLast().joined(separator: ".")
-                process.icon = Constants.defaultProcessIcon
             }
             
             if process.name == "" {
-                process.name = process.pid
+                process.name = "\(process.pid)"
             }
             
             if let download = Int(parsedLine[1]) {
@@ -531,7 +604,7 @@ public class ProcessReader: Reader<[Network_Process]> {
                         upload = 0
                     }
                     
-                    processes.append(Network_Process(time: time, name: p.name, pid: p.pid, download: download, upload: upload, icon: p.icon))
+                    processes.append(Network_Process(pid: p.pid, name: p.name, time: time, download: download, upload: upload))
                 }
             }
             self.previous = list
@@ -564,7 +637,7 @@ internal class ConnectivityReaderWrapper {
 }
 
 // inspired by https://github.com/samiyr/SwiftyPing
-internal class ConnectivityReader: Reader<Bool> {
+internal class ConnectivityReader: Reader<Network_Connectivity> {
     private let variablesQueue = DispatchQueue(label: "eu.exelban.ConnectivityReaderQueue")
     
     private let identifier = UInt16.random(in: 0..<UInt16.max)
@@ -579,6 +652,8 @@ internal class ConnectivityReader: Reader<Bool> {
     
     private var socket: CFSocket?
     private var socketSource: CFRunLoopSource?
+    
+    private var wrapper: Network_Connectivity = Network_Connectivity(status: false)
     
     private var _status: Bool? = nil
     private var status: Bool? {
@@ -610,6 +685,18 @@ internal class ConnectivityReader: Reader<Bool> {
         }
     }
     
+    private var _latency: Double? = nil
+    private var latency: Double? {
+        get {
+            self.variablesQueue.sync { self._latency }
+        }
+        set {
+            self.variablesQueue.sync { self._latency = newValue }
+        }
+    }
+    
+    var start: DispatchTime? = nil
+    
     private struct ICMPHeader {
         public var type: UInt8
         public var code: UInt8
@@ -634,27 +721,29 @@ internal class ConnectivityReader: Reader<Bool> {
     
     override func setup() {
         self.interval = 1
-        self.addr = self.resolve()
-        self.setConn()
-        
-        self.read()
+        DispatchQueue.global(qos: .background).async {
+            self.addr = self.resolve()
+            self.openConn()
+            self.read()
+        }
     }
     
     deinit {
-        if let source = self.socketSource {
-            CFRunLoopSourceInvalidate(source)
-            self.socketSource = nil
-        }
-        if let socket = self.socket {
-            CFSocketInvalidate(socket)
-            self.socket = nil
-        }
-        self.timeoutTimer?.invalidate()
-        self.timeoutTimer = nil
+        self.closeConn()
     }
     
     override func read() {
-        guard !self.host.isEmpty else { return }
+        guard !self.host.isEmpty else {
+            if self.socket != nil {
+                self.closeConn()
+            }
+            return
+        }
+        
+        if self.socket == nil {
+            self.setup()
+        }
+        
         if self.lastHost != self.host {
             self.addr = self.resolve()
         }
@@ -665,12 +754,20 @@ internal class ConnectivityReader: Reader<Bool> {
         let timer = Timer(timeInterval: self.timeout, target: self, selector: #selector(self.timeoutCallback), userInfo: nil, repeats: false)
         RunLoop.main.add(timer, forMode: .common)
         self.timeoutTimer = timer
+        self.start = DispatchTime.now()
         
         let error = CFSocketSendData(socket, addr as CFData, data as CFData, self.timeout)
         if error != .success {
             self.socketCallback(data: nil, error: error)
         }
-        self.callback(self.status)
+        
+        if let v = self.status {
+            self.wrapper.status = v
+            if let l = self.latency {
+                self.wrapper.latency = l
+            }
+            self.callback(self.wrapper)
+        }
     }
     
     @objc private func timeoutCallback() {
@@ -679,10 +776,10 @@ internal class ConnectivityReader: Reader<Bool> {
     }
     
     private func socketCallback(data: Data? = nil, error: CFSocketError? = nil) {
-        guard let data = data, validateResponse(data) else {
-            return
-        }
+        guard let data = data, validateResponse(data) else { return }
+        let end = DispatchTime.now()
         
+        self.latency = Double(end.uptimeNanoseconds - (self.start?.uptimeNanoseconds ?? 0)) / 1_000_000
         self.status = error == nil
         self.isPinging = false
         self.timeoutTimer?.invalidate()
@@ -709,7 +806,14 @@ internal class ConnectivityReader: Reader<Bool> {
     }
     
     private func request() -> Data? {
-        var header = ICMPHeader(type: 8, code: 0, checksum: 0, identifier: CFSwapInt16HostToBig(self.identifier), sequenceNumber: CFSwapInt16HostToBig(0), payload: self.fingerprint.uuid)
+        var header = ICMPHeader(
+            type: 8,
+            code: 0,
+            checksum: 0,
+            identifier: CFSwapInt16HostToBig(self.identifier),
+            sequenceNumber: CFSwapInt16HostToBig(0),
+            payload: self.fingerprint.uuid
+        )
         
         let delta = MemoryLayout<uuid_t>.size - MemoryLayout<uuid_t>.size
         var additional = [UInt8]()
@@ -720,8 +824,7 @@ internal class ConnectivityReader: Reader<Bool> {
         guard let checksum = computeChecksum(header: header, additionalPayload: additional) else { return nil }
         header.checksum = checksum
         
-        let package = Data(bytes: &header, count: MemoryLayout<ICMPHeader>.size) + Data(additional)
-        return package
+        return Data(bytes: &header, count: MemoryLayout<ICMPHeader>.size) + Data(additional)
     }
     
     private func computeChecksum(header: ICMPHeader, additionalPayload: [UInt8]) -> UInt16? {
@@ -762,7 +865,7 @@ internal class ConnectivityReader: Reader<Bool> {
         return nil
     }
     
-    private func setConn() {
+    private func openConn() {
         let info = ConnectivityReaderWrapper(self)
         let unmanagedSocketInfo = Unmanaged.passRetained(info)
         var context = CFSocketContext(version: 0, info: unmanagedSocketInfo.toOpaque(), retain: nil, release: nil, copyDescription: nil)
@@ -780,6 +883,19 @@ internal class ConnectivityReader: Reader<Bool> {
         guard err == 0 else { return }
         self.socketSource = CFSocketCreateRunLoopSource(nil, self.socket, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), self.socketSource, .commonModes)
+    }
+    
+    private func closeConn() {
+        if let source = self.socketSource {
+            CFRunLoopSourceInvalidate(source)
+            self.socketSource = nil
+        }
+        if let socket = self.socket {
+            CFSocketInvalidate(socket)
+            self.socket = nil
+        }
+        self.timeoutTimer?.invalidate()
+        self.timeoutTimer = nil
     }
     
     private func resolve() -> Data? {

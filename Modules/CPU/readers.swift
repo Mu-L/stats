@@ -70,7 +70,7 @@ internal class LoadReader: Reader<CPU_Load> {
             }
             self.CPUUsageLock.unlock()
             
-            let showHyperthratedCores = Store.shared.bool(key: "CPU_hyperhreading", defaultValue: false) 
+            let showHyperthratedCores = Store.shared.bool(key: "CPU_hyperhreading", defaultValue: false)
             if showHyperthratedCores || !self.hasHyperthreadingCores {
                 self.response.usagePerCore = self.usagePerCore
             } else {
@@ -212,33 +212,27 @@ public class ProcessReader: Reader<[TopProcess]> {
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: outputData, as: UTF8.self)
-        _ = String(decoding: errorData, as: UTF8.self)
-        
-        if output.isEmpty {
-            return
-        }
+        let output = String(data: outputData, encoding: .utf8)
+        _ = String(data: errorData, encoding: .utf8)
+        guard let output, !output.isEmpty else { return }
         
         var index = 0
         var processes: [TopProcess] = []
-        output.enumerateLines { (line, stop) -> Void in
+        output.enumerateLines { (line, stop) in
             if index != 0 {
-                var str = line.trimmingCharacters(in: .whitespaces)
-                let pidString = str.findAndCrop(pattern: "^\\d+")
-                let usageString = str.findAndCrop(pattern: "^[0-9,.]+ ")
-                let command = str.trimmingCharacters(in: .whitespaces)
+                let str = line.trimmingCharacters(in: .whitespaces)
+                let pidFind = str.findAndCrop(pattern: "^\\d+")
+                let usageFind = pidFind.remain.findAndCrop(pattern: "^[0-9,.]+ ")
+                let command = usageFind.remain.trimmingCharacters(in: .whitespaces)
+                let pid = Int(pidFind.cropped) ?? 0
+                let usage = Double(usageFind.cropped.replacingOccurrences(of: ",", with: ".")) ?? 0
                 
-                let pid = Int(pidString) ?? 0
-                let usage = Double(usageString.replacingOccurrences(of: ",", with: ".")) ?? 0
-                
-                var name: String? = nil
-                var icon: NSImage? = nil
-                if let app = NSRunningApplication(processIdentifier: pid_t(pid) ) {
-                    name = app.localizedName ?? nil
-                    icon = app.icon
+                var name: String = command
+                if let app = NSRunningApplication(processIdentifier: pid_t(pid)), let n = app.localizedName {
+                    name = n
                 }
                 
-                processes.append(TopProcess(pid: pid, command: command, name: name, usage: usage, icon: icon))
+                processes.append(TopProcess(pid: pid, name: name, usage: usage))
             }
             
             if index == self.numberOfProcesses { stop = true }
@@ -250,6 +244,20 @@ public class ProcessReader: Reader<[TopProcess]> {
 }
 
 public class TemperatureReader: Reader<Double> {
+    var list: [String] = []
+    
+    public override func setup() {
+        switch SystemKit.shared.device.platform {
+        case .m1, .m1Pro, .m1Max, .m1Ultra:
+            self.list = ["Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b"]
+        case .m2, .m2Pro, .m2Max, .m2Ultra:
+        self.list = ["Tp1h", "Tp1t", "Tp1p", "Tp1l", "Tp01", "Tp05", "Tp09", "Tp0D", "Tp0X", "Tp0b", "Tp0f", "Tp0j"]
+        case .m3, .m3Pro, .m3Max, .m3Ultra:
+            self.list = ["Te05", "Te0L", "Te0P", "Te0S", "Tf04", "Tf09", "Tf0A", "Tf0B", "Tf0D", "Tf0E", "Tf44", "Tf49", "Tf4A", "Tf4B", "Tf4D", "Tf4E"]
+        default: break
+        }
+    }
+    
     public override func read() {
         var temperature: Double? = nil
         
@@ -264,10 +272,9 @@ public class TemperatureReader: Reader<Double> {
         } else if let value = SMC.shared.getValue("TC0H"), value < 110 {
             temperature = value
         } else {
-            #if arch(arm64)
             var total: Double = 0
             var counter: Double = 0
-            ["Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b"].forEach { (key: String) in
+            self.list.forEach { (key: String) in
                 if let value = SMC.shared.getValue(key) {
                     total += value
                     counter += 1
@@ -276,169 +283,182 @@ public class TemperatureReader: Reader<Double> {
             if total != 0 && counter != 0 {
                 temperature = total / counter
             }
-            #endif
         }
         
         self.callback(temperature)
     }
 }
 
-// swiftlint:disable identifier_name
-public class FrequencyReader: Reader<Double> {
-    private typealias PGSample = UInt64
-    private typealias UDouble = UnsafeMutablePointer<Double>
+// inspired by https://github.com/shank03/StatsBar/blob/e175aa71c914ce882ce2e90163f3eb18262a8e25/StatsBar/Service/IOReport.swift
+public class FrequencyReader: Reader<[Double]> {
+    private var eCoreFreqs: [Int32] = []
+    private var pCoreFreqs: [Int32] = []
     
-    private typealias PG_InitializePointerFunction = @convention(c) () -> Bool
-    private typealias PG_ShutdownPointerFunction = @convention(c) () -> Bool
-    private typealias PG_ReadSamplePointerFunction = @convention(c) (Int, UnsafeMutablePointer<PGSample>) -> Bool
-    private typealias PGSample_GetIAFrequencyPointerFunction = @convention(c) (PGSample, PGSample, UDouble, UDouble, UDouble) -> Bool
-    private typealias PGSample_ReleasePointerFunction = @convention(c) (PGSample) -> Bool
+    private var channels: CFMutableDictionary? = nil
+    private var subscription: IOReportSubscriptionRef? = nil
+    private var prev: (samples: CFDictionary, time: TimeInterval)? = nil
     
-    private var bundle: CFBundle? = nil
+    private let measurementCount: Int = 4
     
-    private var PG_Initialize: PG_InitializePointerFunction? = nil
-    private var PG_Shutdown: PG_ShutdownPointerFunction? = nil
-    private var PG_ReadSample: PG_ReadSamplePointerFunction? = nil
-    private var PGSample_GetIAFrequency: PGSample_GetIAFrequencyPointerFunction? = nil
-    private var PGSample_Release: PGSample_ReleasePointerFunction? = nil
-    
-    private var sample: PGSample = 0
-    private var reconnectAttempt: Int = 0
-    
-    private var isEnabled: Bool {
-        get {
-            return Store.shared.bool(key: "CPU_IPG", defaultValue: false)
-        }
+    private struct IOSample {
+        let group: String
+        let subGroup: String
+        let channel: String
+        let unit: String
+        let delta: CFDictionary
     }
     
     public override func setup() {
-        guard self.isEnabled else { return }
-        
-        let path: CFString = "/Library/Frameworks/IntelPowerGadget.framework" as CFString
-        let bundleURL = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, path, CFURLPathStyle.cfurlposixPathStyle, true)
-        
-        self.bundle = CFBundleCreate(kCFAllocatorDefault, bundleURL)
-        if self.bundle == nil {
-            error("IntelPowerGadget framework not found", log: self.log)
-            return
-        }
-        
-        if !CFBundleLoadExecutable(self.bundle) {
-            error("failed to load IPG framework", log: self.log)
-            return
-        }
-        
-        guard let PG_InitializePointer = CFBundleGetFunctionPointerForName(self.bundle, "PG_Initialize" as CFString) else {
-            error("failed to find PG_Initialize", log: self.log)
-            return
-        }
-        guard let PG_ShutdownPointer = CFBundleGetFunctionPointerForName(self.bundle, "PG_Shutdown" as CFString) else {
-            error("failed to find PG_Shutdown", log: self.log)
-            return
-        }
-        guard let PG_ReadSamplePointer = CFBundleGetFunctionPointerForName(self.bundle, "PG_ReadSample" as CFString) else {
-            error("failed to find PG_ReadSample", log: self.log)
-            return
-        }
-        guard let PGSample_GetIAFrequencyPointer = CFBundleGetFunctionPointerForName(self.bundle, "PGSample_GetIAFrequency" as CFString) else {
-            error("failed to find PGSample_GetIAFrequency", log: self.log)
-            return
-        }
-        guard let PGSample_ReleasePointer = CFBundleGetFunctionPointerForName(self.bundle, "PGSample_Release" as CFString) else {
-            error("failed to find PGSample_Release", log: self.log)
-            return
-        }
-        
-        self.PG_Initialize = unsafeBitCast(PG_InitializePointer, to: PG_InitializePointerFunction.self)
-        self.PG_Shutdown = unsafeBitCast(PG_ShutdownPointer, to: PG_ShutdownPointerFunction.self)
-        self.PG_ReadSample = unsafeBitCast(PG_ReadSamplePointer, to: PG_ReadSamplePointerFunction.self)
-        self.PGSample_GetIAFrequency = unsafeBitCast(PGSample_GetIAFrequencyPointer, to: PGSample_GetIAFrequencyPointerFunction.self)
-        self.PGSample_Release = unsafeBitCast(PGSample_ReleasePointer, to: PGSample_ReleasePointerFunction.self)
-        
-        if let initialize = self.PG_Initialize {
-            if !initialize() {
-                error("IPG initialization failed", log: self.log)
-                return
-            }
-        }
-    }
-    
-    deinit {
-        if let bundle = self.bundle {
-            CFBundleUnloadExecutable(bundle)
-        }
-    }
-    
-    public override func terminate() {
-        if let shutdown = self.PG_Shutdown {
-            if !shutdown() {
-                error("IPG shutdown failed", log: self.log)
-                return
-            }
-        }
-        
-        if let release = self.PGSample_Release {
-            if self.sample != 0 {
-                _ = release(self.sample)
-                return
-            }
-        }
-    }
-    
-    private func reconnect() {
-        if self.reconnectAttempt >= 5 {
-            return
-        }
-        
-        self.sample = 0
-        self.terminate()
-        if let initialize = self.PG_Initialize {
-            if !initialize() {
-                error("IPG initialization failed", log: self.log)
-                return
-            }
-        }
-        
-        self.reconnectAttempt += 1
+        self.eCoreFreqs = SystemKit.shared.device.info.cpu?.eCoreFrequencies ?? []
+        self.pCoreFreqs = SystemKit.shared.device.info.cpu?.pCoreFrequencies ?? []
+        self.channels = self.getChannels()
+        var dict: Unmanaged<CFMutableDictionary>?
+        self.subscription = IOReportCreateSubscription(nil, self.channels, &dict, 0, nil)
+        dict?.release()
     }
     
     public override func read() {
-        if !self.isEnabled || self.PG_ReadSample == nil || self.PGSample_GetIAFrequency == nil || self.PGSample_Release == nil {
-            return
-        }
+        guard !self.eCoreFreqs.isEmpty && !self.pCoreFreqs.isEmpty, self.channels != nil, self.subscription != nil else { return }
+        let minECoreFreq = Double(self.eCoreFreqs.min() ?? 0)
+        let minPCoreFreq = Double(self.pCoreFreqs.min() ?? 0)
         
-        // first sample initlialization
-        if self.sample == 0 {
-            if !self.PG_ReadSample!(0, &self.sample) {
-                error("read self.sample failed", log: self.log)
+        Task {
+            var eCores: [Double] = []
+            var pCores: [Double] = []
+            
+            for (samples, _) in await self.getSamples() {
+                var eCore: [Double] = []
+                var pCore: [Double] = []
+                
+                for sample in samples {
+                    guard sample.group == "CPU Stats" else { continue }
+                    if sample.channel.starts(with: "ECPU") {
+                        eCore.append(self.calculateFrequencies(dict: sample.delta, freqs: self.eCoreFreqs))
+                    }
+                    if sample.channel.starts(with: "PCPU") {
+                        pCore.append(self.calculateFrequencies(dict: sample.delta, freqs: self.pCoreFreqs))
+                    }
+                }
+                
+                let eCoresAvgFreq: Double = eCore.isEmpty ? 0 : (eCore.reduce(0.0, { $0 + $1 }) / Double(eCore.count))
+                let pCoresAvgFreq: Double = pCore.isEmpty ? 0 : (pCore.reduce(0.0, { $0 + $1 }) / Double(pCore.count))
+                eCores.append(max(eCoresAvgFreq, minECoreFreq))
+                pCores.append(max(pCoresAvgFreq, minPCoreFreq))
             }
-            return
+            
+            let eFreq: Double = eCores.reduce(0, { $0 + $1 }) / Double(self.measurementCount)
+            let pFreq: Double = pCores.reduce(0, { $0 + $1 }) / Double(self.measurementCount)
+            
+            self.callback([eFreq, pFreq])
+        }
+    }
+    
+    private func calculateFrequencies(dict: CFDictionary, freqs: [Int32]) -> Double {
+        let items = self.getResidencies(dict: dict)
+        guard let offset = items.firstIndex(where: { $0.0 != "IDLE" && $0.0 != "DOWN" && $0.0 != "OFF" }) else { return 0 }
+        let usage = items.dropFirst(offset).reduce(0.0) { $0 + Double($1.f) }
+        let count = freqs.count
+        var avgFreq: Double = 0
+        
+        for i in 0..<count {
+            let key = i + offset
+            if !items.indices.contains(key) { continue }
+            let percent = usage == 0 ? 0 : Double(items[key].f) / usage
+            avgFreq += percent * Double(freqs[i])
         }
         
-        var local: PGSample = 0
-        var value: Double = 0
-        var min: Double = 0
-        var max: Double = 0
+        return avgFreq
+    }
+    
+    func getResidencies(dict: CFDictionary) -> [(ns: String, f: Int64)] {
+        let count = IOReportStateGetCount(dict)
+        var res: [(String, Int64)] = []
         
-        if !self.PG_ReadSample!(0, &local) {
-            self.reconnect()
-            error("read local sample failed", log: self.log)
-            return
+        for i in 0..<count {
+            let name = IOReportStateGetNameForIndex(dict, i)?.takeUnretainedValue() ?? ("" as CFString)
+            let val = IOReportStateGetResidency(dict, i)
+            res.append((name as String, val))
         }
         
-        defer {
-            if !self.PGSample_Release!(self.sample) {
-                error("release self.sample failed", log: self.log)
+        return res
+    }
+    
+    private func getChannels() -> CFMutableDictionary? {
+        let channelNames = [
+            ("CPU Stats", "CPU Complex Performance States"),
+            ("CPU Stats", "CPU Core Performance States")
+        ]
+        
+        var channels: [CFDictionary] = []
+        for (gname, sname) in channelNames {
+            let channel = IOReportCopyChannelsInGroup(gname as CFString?, sname as CFString?, 0, 0, 0)
+            guard let channel = channel?.takeRetainedValue() else { continue }
+            channels.append(channel)
+        }
+        
+        let chan = channels[0]
+        for i in 1..<channels.count {
+            IOReportMergeChannels(chan, channels[i], nil)
+        }
+        
+        let size = CFDictionaryGetCount(chan)
+        guard let channel = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, size, chan),
+              let chan = channel as? [String: Any], chan["IOReportChannels"] != nil else {
+            return nil
+        }
+        
+        return channel
+    }
+    
+    private func getSamples() async -> [([IOSample], TimeInterval)] {
+        let duration = 500
+        let step = UInt64(duration / self.measurementCount)
+        var prev = self.prev ?? self.getSample() ?? self.prev!
+        var samples = [([IOSample], TimeInterval)]()
+        
+        for _ in 0..<self.measurementCount {
+            let milliseconds = UInt64(step) * 1_000_000
+            try? await Task.sleep(nanoseconds: milliseconds)
+            guard let next = self.getSample() else { continue }
+            guard let diff = IOReportCreateSamplesDelta(prev.samples, next.samples, nil)?.takeRetainedValue() else {
+                continue
             }
-            self.sample = local
+            let elapsed = Date(timeIntervalSince1970: next.time).timeIntervalSince(Date(timeIntervalSince1970: prev.time))
+            prev = next
+            samples.append((self.collectIOSamples(data: diff), max(elapsed, TimeInterval(1))))
         }
         
-        if !self.PGSample_GetIAFrequency!(self.sample, local, &value, &min, &max) {
-            error("read frequency failed", log: self.log)
-            return
+        self.prev = prev
+        return samples
+    }
+    
+    private func getSample() -> (samples: CFDictionary, time: TimeInterval)? {
+        guard let sample = IOReportCreateSamples(self.subscription, self.channels, nil)?.takeRetainedValue() else {
+            return nil
+        }
+        return (sample, Date().timeIntervalSince1970)
+    }
+    
+    private func collectIOSamples(data: CFDictionary) -> [IOSample] {
+        let dict = data as! [String: Any]
+        let items = dict["IOReportChannels"] as! CFArray
+        let itemSize = CFArrayGetCount(items)
+        
+        var samples = [IOSample]()
+        
+        for index in 0..<itemSize {
+            let dict = CFArrayGetValueAtIndex(items, index)
+            let item = unsafeBitCast(dict, to: CFDictionary.self)
+            
+            let group = IOReportChannelGetGroup(item)?.takeUnretainedValue() ?? ("" as CFString)
+            let subGroup = IOReportChannelGetSubGroup(item)?.takeUnretainedValue() ?? ("" as CFString)
+            let channel = IOReportChannelGetChannelName(item)?.takeUnretainedValue() ?? ("" as CFString)
+            let unit = IOReportChannelGetUnitLabel(item)?.takeUnretainedValue() ?? ("" as CFString)
+            
+            samples.append(IOSample(group: group as String, subGroup: subGroup as String, channel: channel as String, unit: unit as String, delta: item))
         }
         
-        self.callback(value)
+        return samples
     }
 }
 
@@ -464,10 +484,9 @@ public class LimitReader: Reader<CPU_Limit> {
         }
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        var lines = String(decoding: outputData, as: UTF8.self).split(separator: "\n")
-        if lines.isEmpty {
-            return
-        }
+        guard let str = String(data: outputData, encoding: .utf8) else { return }
+        var lines = str.split(separator: "\n")
+        guard !lines.isEmpty else { return }
         lines.removeFirst(3)
         
         lines.forEach { (line: Substring) in
@@ -512,12 +531,13 @@ public class AverageReader: Reader<[Double]> {
         }
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        guard let line = String(decoding: outputData, as: UTF8.self).split(separator: "\n").first else {
+        guard let raw = String(data: outputData, encoding: .utf8), let line = raw.split(separator: "\n").first else {
             return
         }
         
-        var str = line.trimmingCharacters(in: .whitespaces)
-        let strArr = str.findAndCrop(pattern: "(\\d+(.|,)\\d+ *){3}$").split(separator: " ")
+        let str = line.trimmingCharacters(in: .whitespaces)
+        let strFind = str.findAndCrop(pattern: "(\\d+(.|,)\\d+ *){3}$")
+        let strArr = strFind.cropped.split(separator: " ")
         guard strArr.count == 3 else {
             return
         }

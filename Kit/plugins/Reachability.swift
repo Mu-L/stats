@@ -21,7 +21,6 @@ public class Reachability {
     private var isRunning = false
     private var reachability: SCNetworkReachability?
     private let reachabilitySerialQueue = DispatchQueue(label: "eu.exelban.ReachabilityQueue")
-    private let log: NextLog = NextLog.shared.copy(category: "Reachability")
     
     public init(start: Bool = false) {
         var zeroAddress = sockaddr()
@@ -59,7 +58,7 @@ public class Reachability {
                 _ = unmanagedReachability.retain()
                 return UnsafeRawPointer(unmanagedReachability.toOpaque())
             },
-            release: { (info: UnsafeRawPointer) -> Void in
+            release: { (info: UnsafeRawPointer) in
                 Unmanaged<Reachability>.fromOpaque(info).release()
             },
             copyDescription: nil

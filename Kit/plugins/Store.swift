@@ -37,6 +37,14 @@ public class Store {
         return (!self.exist(key: key) ? value : defaults.integer(forKey: key))
     }
     
+    public func array(key: String, defaultValue value: [Any]) -> [Any] {
+        return (!self.exist(key: key) ? value : defaults.array(forKey: key)!)
+    }
+    
+    public func data(key: String) -> Data? {
+        return defaults.data(forKey: key)
+    }
+    
     public func set(key: String, value: Bool) {
         self.defaults.set(value, forKey: key)
     }
@@ -49,9 +57,29 @@ public class Store {
         self.defaults.set(value, forKey: key)
     }
     
+    public func set(key: String, value: Data) {
+        self.defaults.set(value, forKey: key)
+    }
+    
+    public func set(key: String, value: [Any]) {
+        self.defaults.set(value, forKey: key)
+    }
+    
     public func reset() {
         self.defaults.dictionaryRepresentation().keys.forEach { key in
             self.defaults.removeObject(forKey: key)
         }
+    }
+    
+    public func export(to url: URL) {
+        guard let id = Bundle.main.bundleIdentifier,
+              let dicitionary = self.defaults.persistentDomain(forName: id) else { return }
+        NSDictionary(dictionary: dicitionary).write(to: url, atomically: true)
+    }
+    
+    public func `import`(from url: URL) {
+        guard let id = Bundle.main.bundleIdentifier, let dict = NSDictionary(contentsOf: url) as? [String: Any] else { return }
+        self.defaults.setPersistentDomain(dict, forName: id)
+        restartApp(self)
     }
 }

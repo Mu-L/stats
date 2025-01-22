@@ -12,16 +12,14 @@
 import Cocoa
 import Kit
 
-class UpdateWindow: NSWindow, NSWindowDelegate {
+internal class UpdateWindow: NSWindow, NSWindowDelegate {
     private let viewController: UpdateViewController = UpdateViewController()
     
     init() {
-        let w = NSScreen.main!.frame.width
-        let h = NSScreen.main!.frame.height
         super.init(
             contentRect: NSRect(
-                x: w - self.viewController.view.frame.width,
-                y: h - self.viewController.view.frame.height,
+                x: NSScreen.main!.frame.width - self.viewController.view.frame.width,
+                y: NSScreen.main!.frame.height - self.viewController.view.frame.height,
                 width: self.viewController.view.frame.width,
                 height: self.viewController.view.frame.height
             ),
@@ -32,13 +30,8 @@ class UpdateWindow: NSWindow, NSWindowDelegate {
         
         self.title = "Stats"
         self.contentViewController = self.viewController
-        self.animationBehavior = .default
-        self.collectionBehavior = .transient
         self.titlebarAppearsTransparent = true
-        if #available(OSX 10.14, *) {
-            self.appearance = NSAppearance(named: .darkAqua)
-        }
-        self.center()
+        self.positionCenter()
         self.setIsVisible(false)
         
         let windowController = NSWindowController()
@@ -46,12 +39,19 @@ class UpdateWindow: NSWindow, NSWindowDelegate {
         windowController.loadWindow()
     }
     
-    public func open(_ v: version_s) {
-        if !self.isVisible {
+    internal func open(_ v: version_s, settingButton: Bool = false) {
+        if !self.isVisible || settingButton {
             self.setIsVisible(true)
             self.makeKeyAndOrderFront(nil)
         }
         self.viewController.open(v)
+    }
+    
+    private func positionCenter() {
+        self.setFrameOrigin(NSPoint(
+            x: (NSScreen.main!.frame.width - self.viewController.view.frame.width)/2,
+            y: (NSScreen.main!.frame.height - self.viewController.view.frame.height)/1.75
+        ))
     }
 }
 
@@ -68,7 +68,7 @@ private class UpdateViewController: NSViewController {
         fatalError("init(coder:) has not been implemented")
     }
     
-    public func open(_ v: version_s) {
+    internal func open(_ v: version_s) {
         self.update.clear()
         
         if v.newest {
@@ -99,7 +99,7 @@ private class UpdateView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
     
-    public func newVersion(_ version: version_s) {
+    internal func newVersion(_ version: version_s) {
         self.version = version
         let view: NSStackView = NSStackView(frame: NSRect(
             x: Constants.Settings.margin,
@@ -112,7 +112,7 @@ private class UpdateView: NSView {
         view.distribution = .fillEqually
         view.spacing = Constants.Settings.margin
         view.edgeInsets = NSEdgeInsets(
-            top: Constants.Settings.margin*1.5,
+            top: Constants.Settings.margin*2,
             left: 0,
             bottom: Constants.Settings.margin,
             right: 0
@@ -190,10 +190,10 @@ private class UpdateView: NSView {
         self.addSubview(view)
     }
     
-    public func noUpdates() {
+    internal func noUpdates() {
         let view: NSView = NSView(frame: NSRect(x: 10, y: 10, width: self.frame.width - 20, height: self.frame.height - 20))
         
-        let title: NSTextField = TextView(frame: NSRect(x: 0, y: ((view.frame.height - 18)/2), width: view.frame.width, height: 40))
+        let title: NSTextField = TextView(frame: NSRect(x: 0, y: ((view.frame.height - 18)/2), width: view.frame.width, height: 34))
         title.font = NSFont.systemFont(ofSize: 14, weight: .light)
         title.alignment = .center
         title.stringValue = localizedString("The latest version of Stats installed")
@@ -209,11 +209,11 @@ private class UpdateView: NSView {
         self.addSubview(view)
     }
     
-    public func clear() {
+    internal func clear() {
         self.subviews.filter{ !($0 is NSVisualEffectView) }.forEach{ $0.removeFromSuperview() }
     }
     
-    @objc private func download(_ sender: Any) {
+    @objc private func download() {
         guard let urlString = self.version?.url, let url = URL(string: urlString) else {
             return
         }
@@ -273,17 +273,21 @@ private class UpdateView: NSView {
         self.addSubview(view)
     }
     
-    @objc private func close(_ sender: Any) {
+    @objc private func close() {
         self.window?.close()
     }
     
-    @objc private func changelog(_ sender: Any) {
+    @objc private func changelog() {
         if let version = self.version {
             NSWorkspace.shared.open(URL(string: "https://github.com/exelban/stats/releases/tag/\(version.latest)")!)
         }
     }
     
-    @objc private func install(_ sender: Any) {
-        updater.install(path: self.path)
+    @objc private func install() {
+        updater.install(path: self.path) { error in
+            if let error {
+                showAlert("Error update Stats", error, .critical)
+            }
+        }
     }
 }

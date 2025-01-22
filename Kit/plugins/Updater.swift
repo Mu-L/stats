@@ -26,7 +26,7 @@ public struct version_s {
     }
 }
 
-public struct Version {
+internal struct Version {
     var major: Int = 0
     var minor: Int = 0
     var patch: Int = 0
@@ -62,7 +62,7 @@ public class Updater {
     
     public init(github: String, url: String) {
         self.github = URL(string: "https://api.github.com/repos/\(github)/releases/latest")!
-        self.server = URL(string: url)!
+        self.server = URL(string: "\(url)?macOS=\(ProcessInfo().operatingSystemVersion.getFullVersion())")!
     }
     
     deinit {
@@ -165,10 +165,21 @@ public class Updater {
         downloadTask.resume()
     }
     
-    public func install(path: String) {
+    public func install(path: String, completion: @escaping (_ error: String?) -> Void) {
+        let pwd = Bundle.main.bundleURL.absoluteString
+            .replacingOccurrences(of: "file://", with: "")
+            .replacingOccurrences(of: "Stats.app", with: "")
+            .replacingOccurrences(of: "//", with: "/")
+        let dmg = path.replacingOccurrences(of: "file://", with: "")
+        
+        if !FileManager.default.isWritableFile(atPath: pwd) {
+            completion("has no write permission on \(pwd)")
+            return
+        }
+        
         let diff = (Int(Date().timeIntervalSince1970) - self.lastInstallTS) / 60
         if diff <= 3 {
-            print("last install was \(diff) minutes ago, stopping...")
+            completion("last install was \(diff) minutes ago, stopping...")
             return
         }
         
@@ -194,11 +205,6 @@ public class Updater {
         
         print("Script is copied to $TMPDIR/updater.sh")
         
-        let pwd = Bundle.main.bundleURL.absoluteString
-            .replacingOccurrences(of: "file://", with: "")
-            .replacingOccurrences(of: "Stats.app", with: "")
-            .replacingOccurrences(of: "//", with: "/")
-        let dmg = path.replacingOccurrences(of: "file://", with: "")
         asyncShell("sh $TMPDIR/updater.sh --app \(pwd) --dmg \(dmg) >/dev/null &") // run updater script in in background
         
         print("Run updater.sh with app: \(pwd) and dmg: \(dmg)")
@@ -210,17 +216,17 @@ public class Updater {
         var toPath = to
         let fileName = (URL(fileURLWithPath: to.absoluteString)).lastPathComponent
         let fileExt  = (URL(fileURLWithPath: to.absoluteString)).pathExtension
-        var fileNameWithotSuffix: String!
+        var fileNameWithoutSuffix: String!
         var newFileName: String!
         var counter = 0
         
         if fileName.hasSuffix(fileExt) {
-            fileNameWithotSuffix = String(fileName.prefix(fileName.count - (fileExt.count+1)))
+            fileNameWithoutSuffix = String(fileName.prefix(fileName.count - (fileExt.count+1)))
         }
         
         while toPath.checkFileExist() {
             counter += 1
-            newFileName =  "\(fileNameWithotSuffix!)-\(counter).\(fileExt)"
+            newFileName =  "\(fileNameWithoutSuffix!)-\(counter).\(fileExt)"
             toPath = to.deletingLastPathComponent().appendingPathComponent(newFileName)
         }
         

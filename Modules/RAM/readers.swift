@@ -52,6 +52,8 @@ internal class UsageReader: Reader<RAM_Usage> {
             let compressed = Double(stats.compressor_page_count) * Double(vm_page_size)
             let purgeable = Double(stats.purgeable_count) * Double(vm_page_size)
             let external = Double(stats.external_page_count) * Double(vm_page_size)
+            let swapins = Int64(stats.swapins)
+            let swapouts = Int64(stats.swapouts)
             
             let used = active + inactive + speculative + wired + compressed - purgeable - external
             let free = self.totalSize - used
@@ -59,6 +61,13 @@ internal class UsageReader: Reader<RAM_Usage> {
             var intSize: size_t = MemoryLayout<uint>.size
             var pressureLevel: Int = 0
             sysctlbyname("kern.memorystatus_vm_pressure_level", &pressureLevel, &intSize, nil, 0)
+            
+            var pressureValue: RAMPressure
+            switch pressureLevel {
+            case 2: pressureValue = .warning
+            case 4: pressureValue = .critical
+            default: pressureValue = .normal
+            }
             
             var stringSize: size_t = MemoryLayout<xsw_usage>.size
             var swap: xsw_usage = xsw_usage()
@@ -76,15 +85,16 @@ internal class UsageReader: Reader<RAM_Usage> {
                 
                 app: used - wired - compressed,
                 cache: purgeable + external,
-                pressure: 100.0 * (wired + compressed) / self.totalSize,
-                
-                pressureLevel: DispatchSource.MemoryPressureEvent(rawValue: UInt(pressureLevel)),
                 
                 swap: Swap(
                     total: Double(swap.xsu_total),
                     used: Double(swap.xsu_used),
                     free: Double(swap.xsu_avail)
-                )
+                ),
+                pressure: Pressure(level: pressureLevel, value: pressureValue),
+                
+                swapins: swapins,
+                swapouts: swapouts
             ))
             return
         }
@@ -136,15 +146,12 @@ public class ProcessReader: Reader<[TopProcess]> {
         
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(decoding: outputData, as: UTF8.self)
-        _ = String(decoding: errorData, as: UTF8.self)
-        
-        if output.isEmpty {
-            return
-        }
+        let output = String(data: outputData, encoding: .utf8)
+        _ = String(data: errorData, encoding: .utf8)
+        guard let output, !output.isEmpty else { return }
         
         var processes: [TopProcess] = []
-        output.enumerateLines { (line, _) -> Void in
+        output.enumerateLines { (line, _) in
             if line.matches("^\\d+\\** +.* +\\d+[A-Z]*\\+?\\-? *$") {
                 processes.append(ProcessReader.parseProcess(line))
             }
@@ -186,15 +193,16 @@ public class ProcessReader: Reader<[TopProcess]> {
             usage *= 1024 // apply gigabyte multiplier
         } else if usageString.last == "K" {
             usage /= 1024 // apply kilobyte divider
+        } else if usageString.last == "M" && usageString.count == 5 {
+            usage /= 1024
+            usage *= 1000
         }
         
         var name: String = command
-        var icon: NSImage? = nil
-        if let app = NSRunningApplication(processIdentifier: pid_t(pid) ) {
-            name = app.localizedName ?? command
-            icon = app.icon
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)), let n = app.localizedName {
+            name = n
         }
         
-        return TopProcess(pid: pid, command: command, name: name, usage: usage * Double(1024 * 1024), icon: icon)
+        return TopProcess(pid: pid, name: name, usage: usage * Double(1000 * 1000))
     }
 }

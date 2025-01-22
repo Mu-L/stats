@@ -19,8 +19,9 @@ import Battery
 import Sensors
 import GPU
 import Bluetooth
+import Clock
 
-let updater = Updater(github: "exelban/stats", url: "https://api.serhiy.io/v1/stats/release/latest")
+let updater = Updater(github: "exelban/stats", url: "https://api.mac-stats.com/release/latest")
 var modules: [Module] = [
     CPU(),
     GPU(),
@@ -29,21 +30,28 @@ var modules: [Module] = [
     Sensors(),
     Network(),
     Battery(),
-    Bluetooth()
+    Bluetooth(),
+    Clock()
 ]
+let telemetry: Telemetry = Telemetry(&modules)
 
 @main
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     internal let settingsWindow: SettingsWindow = SettingsWindow()
     internal let updateWindow: UpdateWindow = UpdateWindow()
     internal let setupWindow: SetupWindow = SetupWindow()
+    internal let supportWindow: SupportWindow = SupportWindow()
     internal let updateActivity = NSBackgroundActivityScheduler(identifier: "eu.exelban.Stats.updateCheck")
+    internal let supportActivity = NSBackgroundActivityScheduler(identifier: "eu.exelban.Stats.support")
     internal var clickInNotification: Bool = false
     internal var menuBarItem: NSStatusItem? = nil
+    internal var combinedView: CombinedView = CombinedView()
     
     internal var pauseState: Bool {
         Store.shared.bool(key: "pause", defaultValue: false)
     }
+    
+    private var startTS: Date?
     
     static func main() {
         let app = NSApplication.shared
@@ -57,16 +65,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         
         self.parseArguments()
         self.parseVersion()
+        SMCHelper.shared.checkForUpdate()
         self.setup {
-            modules.forEach{ $0.mount() }
+            modules.reversed().forEach{ $0.mount() }
             self.settingsWindow.setModules()
         }
         self.defaultValues()
         self.icon()
         
         NotificationCenter.default.addObserver(self, selector: #selector(listenForAppPause), name: .pause, object: nil)
+        NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            self?.handleKeyEvent(event)
+        }
+        NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+            self?.handleKeyEvent(event)
+            return event
+        }
         
         info("Stats started in \((startingPoint.timeIntervalSinceNow * -1).rounded(toPlaces: 4)) seconds")
+        self.startTS = Date()
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
@@ -82,6 +99,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             self.clickInNotification = false
             return true
         }
+        guard let startTS = self.startTS, Date().timeIntervalSince(startTS) > 2 else { return false }
         
         if flag {
             self.settingsWindow.makeKeyAndOrderFront(self)
@@ -92,7 +110,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
     
-    @available(macOS 10.14, *)
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
@@ -102,7 +119,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             debug("Downloading new version of app...")
             if let url = URL(string: uri) {
                 updater.download(url, completion: { path in
-                    updater.install(path: path)
+                    updater.install(path: path) { error in
+                        if let error {
+                            showAlert("Error update Stats", error, .critical)
+                        }
+                    }
                 })
             }
         }

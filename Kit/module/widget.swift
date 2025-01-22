@@ -20,20 +20,20 @@ public enum widget_t: String {
     case networkChart = "network_chart"
     case speed = "speed"
     case battery = "battery"
-    case sensors = "sensors"
+    case batteryDetails = "battery_details"
+    case stack = "sensors" // to replace
     case memory = "memory"
     case label = "label"
     case tachometer = "tachometer"
     case state = "state"
+    case text = "text"
     
-    public func new(module: String, config: NSDictionary, defaultWidget: widget_t) -> Widget? {
+    public func new(module: String, config: NSDictionary, defaultWidget: widget_t) -> SWidget? {
+        guard let widgetConfig: NSDictionary = config[self.rawValue] as? NSDictionary else { return nil }
+        
         var image: NSImage? = nil
         var preview: widget_p? = nil
         var item: widget_p? = nil
-        
-        guard let widgetConfig: NSDictionary = config[self.rawValue] as? NSDictionary else {
-            return nil
-        }
         
         switch self {
         case .mini:
@@ -55,23 +55,29 @@ public enum widget_t: String {
             preview = SpeedWidget(title: module, config: widgetConfig, preview: true)
             item = SpeedWidget(title: module, config: widgetConfig, preview: false)
         case .battery:
-            preview = BatterykWidget(title: module, config: widgetConfig, preview: true)
-            item = BatterykWidget(title: module, config: widgetConfig, preview: false)
-        case .sensors:
-            preview = SensorsWidget(title: module, config: widgetConfig, preview: true)
-            item = SensorsWidget(title: module, config: widgetConfig, preview: false)
+            preview = BatteryWidget(title: module, preview: true)
+            item = BatteryWidget(title: module, preview: false)
+        case .batteryDetails:
+            preview = BatteryDetailsWidget(title: module, preview: true)
+            item = BatteryDetailsWidget(title: module, preview: false)
+        case .stack:
+            preview = StackWidget(title: module, config: widgetConfig, preview: true)
+            item = StackWidget(title: module, config: widgetConfig, preview: false)
         case .memory:
             preview = MemoryWidget(title: module, config: widgetConfig, preview: true)
             item = MemoryWidget(title: module, config: widgetConfig, preview: false)
         case .label:
-            preview = Label(title: module, config: widgetConfig, preview: true)
-            item = Label(title: module, config: widgetConfig, preview: false)
+            preview = Label(title: module, config: widgetConfig)
+            item = Label(title: module, config: widgetConfig)
         case .tachometer:
-            preview = Tachometer(title: module, config: widgetConfig, preview: true)
-            item = Tachometer(title: module, config: widgetConfig, preview: false)
+            preview = Tachometer(title: module, preview: true)
+            item = Tachometer(title: module, preview: false)
         case .state:
             preview = StateWidget(title: module, config: widgetConfig, preview: true)
             item = StateWidget(title: module, config: widgetConfig, preview: false)
+        case .text:
+            preview = TextWidget(title: module, config: widgetConfig, preview: true)
+            item = TextWidget(title: module, config: widgetConfig, preview: false)
         default: break
         }
         
@@ -91,13 +97,15 @@ public enum widget_t: String {
                 } else if module == "CPU" {
                     width = 30 + (Constants.Widget.margin.x*2)
                 }
-            case is SensorsWidget:
+            case is StackWidget:
                 if module == "Sensors" {
                     width = 25
+                } else if module == "Clock" {
+                    width = 114
                 }
             case is MemoryWidget:
                 width = view.bounds.width + 8 + Constants.Widget.spacing*2
-            case is BatterykWidget:
+            case is BatteryWidget:
                 width = view.bounds.width - 3
             default: width = view.bounds.width
             }
@@ -108,12 +116,11 @@ public enum widget_t: String {
                 width: width - view.frame.origin.x,
                 height: view.bounds.height
             )
-            
             image = NSImage(data: view.dataWithPDF(inside: r))
         }
         
         if let item = item, let image = image {
-            return Widget(self, defaultWidget: defaultWidget, module: module, item: item, image: image)
+            return SWidget(self, defaultWidget: defaultWidget, module: module, item: item, image: image)
         }
         
         return nil
@@ -128,11 +135,13 @@ public enum widget_t: String {
         case .networkChart: return localizedString("Network chart widget")
         case .speed: return localizedString("Speed widget")
         case .battery: return localizedString("Battery widget")
-        case .sensors: return localizedString("Text widget")
+        case .batteryDetails: return localizedString("Battery details widget")
+        case .stack: return localizedString("Stack widget")
         case .memory: return localizedString("Memory widget")
         case .label: return localizedString("Label widget")
         case .tachometer: return localizedString("Tachometer widget")
         case .state: return localizedString("State widget")
+        case .text: return localizedString("Text widget")
         default: return ""
         }
     }
@@ -140,29 +149,25 @@ public enum widget_t: String {
 extension widget_t: CaseIterable {}
 
 public protocol widget_p: NSView {
-    var type: widget_t { get }
-    var title: String { get }
-    var position: Int { get set }
-    
     var widthHandler: (() -> Void)? { get set }
+    var onClick: (() -> Void)? { get set }
     
-    func setValues(_ values: [value_t])
     func settings() -> NSView
 }
 
 open class WidgetWrapper: NSView, widget_p {
     public var type: widget_t
     public var title: String
-    public var position: Int = -1
-    
     public var widthHandler: (() -> Void)? = nil
-    
+    public var onClick: (() -> Void)? = nil
     public var shadowSize: CGSize
+    internal var queue: DispatchQueue
     
     public init(_ type: widget_t, title: String, frame: NSRect) {
         self.type = type
         self.title = title
         self.shadowSize = frame.size
+        self.queue = DispatchQueue(label: "eu.exelban.Stats.WidgetWrapper.\(type.rawValue).\(title)")
         
         super.init(frame: frame)
     }
@@ -172,22 +177,54 @@ open class WidgetWrapper: NSView, widget_p {
     }
     
     public func setWidth(_ width: CGFloat) {
-        guard self.shadowSize.width != width else { return }
-        self.shadowSize.width = width
+        var newWidth = width
+        if width == 0 || width == 1 {
+            newWidth = self.emptyView()
+        }
+        
+        guard self.shadowSize.width != newWidth else { return }
+        self.shadowSize.width = newWidth
         
         DispatchQueue.main.async {
-            self.setFrameSize(NSSize(width: width, height: self.frame.size.height))
+            self.setFrameSize(NSSize(width: newWidth, height: self.frame.size.height))
             self.widthHandler?()
         }
     }
     
-    // MARK: - stubs
+    public func emptyView() -> CGFloat {
+        let size: CGFloat = 15
+        let lineWidth = 1 / (NSScreen.main?.backingScaleFactor ?? 1)
+        let offset = lineWidth / 2
+        let width: CGFloat = (Constants.Widget.margin.x*2) + size + (lineWidth*2)
+        
+        NSColor.textColor.set()
+        
+        var circle = NSBezierPath()
+        circle = NSBezierPath(ovalIn: CGRect(x: Constants.Widget.margin.x+offset, y: 1+offset, width: size, height: size))
+        circle.stroke()
+        circle.lineWidth = lineWidth
+        
+        let line = NSBezierPath()
+        line.move(to: NSPoint(x: 3, y: 3.5))
+        line.line(to: NSPoint(x: 13.5, y: 14))
+        line.lineWidth = lineWidth
+        line.stroke()
+        
+        return width
+    }
     
     open func settings() -> NSView { return NSView() }
-    open func setValues(_ values: [value_t]) {}
+    
+    open override func mouseDown(with event: NSEvent) {
+        if let f = self.onClick {
+            f()
+            return
+        }
+        super.mouseDown(with: event)
+    }
 }
 
-public class Widget {
+public class SWidget {
     public let type: widget_t
     public let defaultWidget: widget_t
     public let module: String
@@ -196,7 +233,7 @@ public class Widget {
     
     public var isActive: Bool {
         get {
-            return self.list.contains{ $0 == self.type }
+            self.list.contains{ $0 == self.type }
         }
         set {
             if newValue {
@@ -211,11 +248,11 @@ public class Widget {
     public var sizeCallback: (() -> Void)? = nil
     
     public var log: NextLog {
-        return NextLog.shared.copy(category: self.module)
+        NextLog.shared.copy(category: self.module)
     }
     public var position: Int {
         get {
-            return Store.shared.int(key: "\(self.module)_\(self.type)_position", defaultValue: 0)
+            Store.shared.int(key: "\(self.module)_\(self.type)_position", defaultValue: 0)
         }
         set {
             Store.shared.set(key: "\(self.module)_\(self.type)_position", value: newValue)
@@ -232,7 +269,6 @@ public class Widget {
         }
     }
     
-    private var config: NSDictionary = NSDictionary()
     private var menuBarItem: NSStatusItem? = nil
     private var originX: CGFloat
     
@@ -248,7 +284,6 @@ public class Widget {
             self?.sizeCallback?()
             if let s = self, let item = s.menuBarItem, let width: CGFloat = self?.item.frame.width, item.length != width {
                 item.length = width
-                debug("widget \(s.type) change width to \(Double(width).rounded(toPlaces: 2))", log: s.log)
             }
         }
         self.item.identifier = NSUserInterfaceItemIdentifier(self.type.rawValue)
@@ -307,6 +342,8 @@ public class Widget {
                     self.item.setFrameOrigin(NSPoint(x: self.originX, y: self.item.frame.origin.y))
                 }
                 self.menuBarItem?.button?.addSubview(self.item)
+                self.menuBarItem?.button?.image = NSImage()
+                self.menuBarItem?.button?.toolTip = "\(localizedString(self.module)): \(self.type.name())"
                 
                 if let item = self.menuBarItem, !item.isVisible {
                     self.menuBarItem?.isVisible = true
@@ -323,7 +360,7 @@ public class Widget {
         }
     }
     
-    @objc private func togglePopup(_ sender: Any) {
+    @objc private func togglePopup() {
         if let item = self.menuBarItem, let window = item.button?.window {
             NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: [
                 "module": self.module,
@@ -336,50 +373,71 @@ public class Widget {
 }
 
 public class MenuBar {
-    public var widgets: [Widget] = []
+    public var callback: (() -> Void)? = nil
+    public var widgets: [SWidget] = []
     
     private var moduleName: String
     private var menuBarItem: NSStatusItem? = nil
-    private var view: MenuBarView = MenuBarView()
-    private var active: Bool = false
+    private var queue: DispatchQueue
     
+    private var combinedModules: Bool {
+        Store.shared.bool(key: "CombinedModules", defaultValue: false)
+    }
+    
+    public var view: MenuBarView = MenuBarView()
     public var oneView: Bool = false
-    public var activeWidgets: [Widget] {
-        get {
-            return self.widgets.filter({ $0.isActive })
-        }
+    public var activeWidgets: [SWidget] {
+        self.widgets.filter({ $0.isActive })
     }
     public var sortedWidgets: [widget_t] {
         get {
             var list: [widget_t: Int] = [:]
-            self.activeWidgets.forEach { (w: Widget) in
+            self.activeWidgets.forEach { (w: SWidget) in
                 list[w.type] = w.position
             }
             return list.sorted { $0.1 < $1.1 }.map{ $0.key }
         }
     }
     
+    private var _active: Bool = false
+    public var active: Bool {
+        get {
+            self.queue.sync { self._active }
+        }
+        set {
+            self.queue.sync { self._active = newValue }
+        }
+    }
+    
     init(moduleName: String) {
         self.moduleName = moduleName
+        self.queue = DispatchQueue(label: "eu.exelban.Stats.MenuBar.\(moduleName)")
         self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: self.oneView)
-        self.setupMenuBarItem(self.oneView)
+        self.view.identifier = NSUserInterfaceItemIdentifier(rawValue: moduleName)
+        
+        if self.combinedModules {
+            self.oneView = true
+        } else {
+            self.setupMenuBarItem(self.oneView)
+        }
         
         NotificationCenter.default.addObserver(self, selector: #selector(listenForOneView), name: .toggleOneView, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(listenForWidgetRearrange), name: .widgetRearrange, object: nil)
     }
     
     deinit {
-        NotificationCenter.default.removeObserver(self)
+        NotificationCenter.default.removeObserver(self, name: .toggleOneView, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .widgetRearrange, object: nil)
     }
     
-    public func append(_ widget: Widget) {
+    public func append(_ widget: SWidget) {
         widget.toggleCallback = { [weak self] (type, state) in
             if let s = self, s.oneView {
                 if state, let w = s.activeWidgets.first(where: { $0.type == type }) {
                     DispatchQueue.main.async(execute: {
                         s.recalculateWidth()
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            s.view.addWidget(w.item, position: w.position)
+                            s.view.addWidget(w.item)
                             s.view.recalculate(s.sortedWidgets)
                         }
                     })
@@ -403,11 +461,12 @@ public class MenuBar {
     }
     
     public func enable() {
-        if self.oneView {
+        if self.oneView && !self.combinedModules {
             self.setupMenuBarItem(true)
         }
         self.active = true
         self.widgets.forEach{ $0.enable() }
+        self.callback?()
     }
     
     public func disable() {
@@ -416,20 +475,25 @@ public class MenuBar {
         if self.oneView {
             self.setupMenuBarItem(false)
         }
+        self.callback?()
     }
     
     private func setupMenuBarItem(_ state: Bool) {
         DispatchQueue.main.async(execute: {
-            if state {
+            if state && self.active {
                 restoreNSStatusItemPosition(id: self.moduleName)
                 self.menuBarItem = NSStatusBar.system.statusItem(withLength: 0)
                 self.menuBarItem?.autosaveName = self.moduleName
                 self.menuBarItem?.isVisible = true
                 
                 self.menuBarItem?.button?.addSubview(self.view)
+                self.menuBarItem?.button?.image = NSImage()
+                self.menuBarItem?.button?.toolTip = "\(localizedString(self.moduleName))"
                 self.menuBarItem?.button?.target = self
                 self.menuBarItem?.button?.action = #selector(self.togglePopup)
                 self.menuBarItem?.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
+                
+                self.recalculateWidth()
             } else if let item = self.menuBarItem {
                 saveNSStatusItemPosition(id: self.moduleName)
                 NSStatusBar.system.removeStatusItem(item)
@@ -445,12 +509,14 @@ public class MenuBar {
             (CGFloat(self.activeWidgets.count - 1) * Constants.Widget.spacing) +
             Constants.Widget.spacing * 2
         self.menuBarItem?.length = w
+        self.view.setFrameOrigin(NSPoint(x: 0, y: 0))
         self.view.setFrameSize(NSSize(width: w, height: Constants.Widget.height))
         
         self.view.recalculate(self.sortedWidgets)
+        self.callback?()
     }
     
-    @objc private func togglePopup(_ sender: Any) {
+    @objc private func togglePopup() {
         if let item = self.menuBarItem, let window = item.button?.window {
             NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: [
                 "module": self.moduleName,
@@ -461,20 +527,27 @@ public class MenuBar {
     }
     
     @objc private func listenForOneView(_ notification: Notification) {
-        guard let name = notification.userInfo?["module"] as? String, name == self.moduleName, self.active else {
-            return
+        if notification.userInfo?["module"] as? String == nil {
+            self.toggleOneView()
+        } else if let name = notification.userInfo?["module"] as? String, name == self.moduleName, self.active {
+            self.toggleOneView()
         }
-        
-        self.activeWidgets.forEach { (w: Widget) in
+    }
+    
+    private func toggleOneView() {
+        self.activeWidgets.forEach { (w: SWidget) in
             w.disable()
         }
         
-        self.setupMenuBarItem(!self.oneView)
-        self.recalculateWidth()
+        if self.combinedModules {
+            self.oneView = true
+            self.setupMenuBarItem(false)
+        } else if self.active {
+            self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: self.oneView)
+            self.setupMenuBarItem(self.oneView)
+        }
         
-        self.oneView = Store.shared.bool(key: "\(self.moduleName)_oneView", defaultValue: self.oneView)
-        
-        self.activeWidgets.forEach { (w: Widget) in
+        self.activeWidgets.forEach { (w: SWidget) in
             w.enable()
         }
     }
@@ -496,7 +569,7 @@ public class MenuBarView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
     
-    public func addWidget(_ view: NSView, position: Int) {
+    public func addWidget(_ view: NSView) {
         self.addSubview(view)
     }
     
@@ -504,7 +577,7 @@ public class MenuBarView: NSView {
         if let view = self.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier(type.rawValue) }) {
             view.removeFromSuperview()
         } else {
-            error("\(type) cound not be removed from the one view bacause not found!")
+            error("\(type) could not be removed from the one view because not found!")
         }
     }
     
