@@ -18,7 +18,7 @@ extension AppDelegate {
         let args = CommandLine.arguments
         
         if args.contains("--reset") {
-            debug("Receive --reset argument. Reseting store (UserDefaults)...")
+            debug("Receive --reset argument. Resetting store (UserDefaults)...")
             Store.shared.reset()
         }
         
@@ -73,23 +73,9 @@ extension AppDelegate {
                 let title: String = localizedString("Successfully updated")
                 let subtitle: String = localizedString("Stats was updated to v", currentVersion)
                 
-                if #available(macOS 10.14, *) {
-                    let id = showNotification(
-                        title: title,
-                        subtitle: subtitle,
-                        delegate: self
-                    )
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                        removeNotification(id)
-                    }
-                } else {
-                    let id = showNSNotification(
-                        title: title,
-                        subtitle: subtitle
-                    )
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                        removeNSNotification(id)
-                    }
+                let id = showNotification(title: title, subtitle: subtitle, delegate: self)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                    removeNotification(id)
                 }
             }
             
@@ -100,14 +86,21 @@ extension AppDelegate {
     }
     
     internal func defaultValues() {
-        if !Store.shared.exist(key: "runAtLoginInitialized") {
-            Store.shared.set(key: "runAtLoginInitialized", value: true)
-            LaunchAtLogin.isEnabled = true
+        if Store.shared.exist(key: "runAtLoginInitialized") {
+            LaunchAtLogin.migrate()
         }
         
         if Store.shared.exist(key: "dockIcon") {
             let dockIconStatus = Store.shared.bool(key: "dockIcon", defaultValue: false) ? NSApplication.ActivationPolicy.regular : NSApplication.ActivationPolicy.accessory
             NSApp.setActivationPolicy(dockIconStatus)
+        }
+        
+        self.checkIfShouldShowSupportWindow()
+        self.supportActivity.interval = 60 * 60 * 24 * 30
+        self.supportActivity.repeats = true
+        self.supportActivity.schedule { (completion: @escaping NSBackgroundActivityScheduler.CompletionHandler) in
+            self.checkIfShouldShowSupportWindow()
+            completion(NSBackgroundActivityScheduler.Result.finished)
         }
         
         if let updateInterval = AppUpdateInterval(rawValue: Store.shared.string(key: "update-interval", defaultValue: AppUpdateInterval.silent.rawValue)) {
@@ -171,7 +164,11 @@ extension AppDelegate {
             if silent {
                 if let url = URL(string: version.url) {
                     updater.download(url, completion: { path in
-                        updater.install(path: path)
+                        updater.install(path: path) { error in
+                            if let error {
+                                showAlert("Error update Stats", error, .critical)
+                            }
+                        }
                     })
                 }
                 return
@@ -179,55 +176,60 @@ extension AppDelegate {
             
             debug("show update view because new version of app found: \(version.latest)")
             
-            if #available(OSX 10.14, *) {
-                let center = UNUserNotificationCenter.current()
-                center.getNotificationSettings { settings in
-                    switch settings.authorizationStatus {
-                    case .authorized, .provisional:
-                        self.showUpdateNotification(version: version)
-                    case .denied:
-                        self.showUpdateWindow(version: version)
-                    case .notDetermined:
-                        center.requestAuthorization(options: [.sound, .alert, .badge], completionHandler: { (_, error) in
-                            if error == nil {
-                                NSApplication.shared.registerForRemoteNotifications()
-                                self.showUpdateNotification(version: version)
-                            } else {
-                                self.showUpdateWindow(version: version)
-                            }
-                        })
-                    @unknown default:
-                        self.showUpdateWindow(version: version)
-                        error_msg("unknown notification setting")
-                    }
+            let center = UNUserNotificationCenter.current()
+            center.getNotificationSettings { settings in
+                switch settings.authorizationStatus {
+                case .authorized, .provisional:
+                    self.showUpdateNotification(version: version)
+                case .denied:
+                    self.showUpdateWindow(version: version)
+                case .notDetermined:
+                    center.requestAuthorization(options: [.sound, .alert, .badge], completionHandler: { (_, error) in
+                        if error == nil {
+                            NSApplication.shared.registerForRemoteNotifications()
+                            self.showUpdateNotification(version: version)
+                        } else {
+                            self.showUpdateWindow(version: version)
+                        }
+                    })
+                @unknown default:
+                    self.showUpdateWindow(version: version)
+                    error_msg("unknown notification setting")
                 }
-            } else {
-                self.showUpdateWindow(version: version)
             }
         }
     }
     
+    func checkIfShouldShowSupportWindow() {
+        if !Store.shared.exist(key: "setupProcess") || !Store.shared.exist(key: "runAtLoginInitialized") {
+            return
+        }
+        
+        let now = Int(Date().timeIntervalSince1970)
+        if !Store.shared.exist(key: "support_ts") {
+            Store.shared.set(key: "support_ts", value: now)
+            self.supportWindow.show()
+            return
+        }
+        
+        let lastShow = Store.shared.int(key: "support_ts", defaultValue: now)
+        let diff = (now - lastShow) / (60 * 60 * 24)
+        if diff <= 31 {
+            debug("The support window was shown \(diff) days ago, stopping...")
+            return
+        }
+        
+        self.supportWindow.show()
+    }
+    
     private func showUpdateNotification(version: version_s) {
         debug("show update notification")
-        
-        let title = localizedString("New version available")
-        let subtitle = localizedString("Click to install the new version of Stats")
-        let userInfo = ["url": version.url]
-        
-        if #available(macOS 10.14, *) {
-            _ = showNotification(
-                title: title,
-                subtitle: subtitle,
-                userInfo: userInfo,
-                delegate: self
-            )
-        } else {
-            _ = showNSNotification(
-                title: title,
-                subtitle: subtitle,
-                userInfo: userInfo
-            )
-        }
+        _ = showNotification(
+            title: localizedString("New version available"),
+            subtitle: localizedString("Click to install the new version of Stats"),
+            userInfo: ["url": version.url],
+            delegate: self
+        )
     }
     
     private func showUpdateWindow(version: version_s) {
@@ -268,5 +270,26 @@ extension AppDelegate {
     
     @objc internal func openSettings() {
         NotificationCenter.default.post(name: .toggleSettings, object: nil, userInfo: ["module": "Dashboard"])
+    }
+    
+    internal func handleKeyEvent(_ event: NSEvent) {
+        var keyCodes: [UInt16] = []
+        if event.modifierFlags.contains(.control) { keyCodes.append(59) }
+        if event.modifierFlags.contains(.shift) { keyCodes.append(60) }
+        if event.modifierFlags.contains(.command) { keyCodes.append(55) }
+        if event.modifierFlags.contains(.option) { keyCodes.append(58) }
+        keyCodes.append(event.keyCode)
+        
+        guard !keyCodes.isEmpty,
+              let module = modules.first(where: { $0.enabled && $0.popupKeyboardShortcut == keyCodes }),
+              let widget = module.menuBar.widgets.filter({ $0.isActive }).first,
+              let window = widget.item.window else { return }
+        
+        NotificationCenter.default.post(name: .togglePopup, object: nil, userInfo: [
+            "module": module.name,
+            "widget": widget.type,
+            "origin": window.frame.origin,
+            "center": window.frame.width/2
+        ])
     }
 }

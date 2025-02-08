@@ -15,21 +15,16 @@ import Kit
 private let setupSize: CGSize = CGSize(width: 600, height: 400)
 
 internal class SetupWindow: NSWindow, NSWindowDelegate {
+    internal var finishHandler: () -> Void = {}
+    
     private let view: SetupContainer = SetupContainer()
     private let vc: NSViewController = NSViewController(nibName: nil, bundle: nil)
-    
-    public var finishHandler: () -> Void = {}
     
     init() {
         self.vc.view = self.view
         
         super.init(
-            contentRect: NSRect(
-                x: NSScreen.main!.frame.width - self.view.frame.width,
-                y: NSScreen.main!.frame.height - self.view.frame.height,
-                width: self.view.frame.width,
-                height: self.view.frame.height
-            ),
+            contentRect: NSRect(x: 0, y: 0, width: self.view.frame.width, height: self.view.frame.height),
             styleMask: [.closable, .titled],
             backing: .buffered,
             defer: true
@@ -37,12 +32,11 @@ internal class SetupWindow: NSWindow, NSWindowDelegate {
         
         self.contentViewController = self.vc
         self.animationBehavior = .default
-        self.collectionBehavior = .moveToActiveSpace
         self.titlebarAppearsTransparent = true
         self.delegate = self
         self.title = localizedString("Stats Setup")
         
-        self.center()
+        self.positionCenter()
         self.setIsVisible(false)
         
         let windowController = NSWindowController()
@@ -50,21 +44,29 @@ internal class SetupWindow: NSWindow, NSWindowDelegate {
         windowController.loadWindow()
     }
     
-    public func show() {
+    internal func show() {
         self.setIsVisible(true)
+        self.orderFrontRegardless()
     }
     
-    public func hide() {
+    internal func hide() {
         self.close()
     }
     
     func windowWillClose(_ notification: Notification) {
         self.finishHandler()
     }
+    
+    private func positionCenter() {
+        self.setFrameOrigin(NSPoint(
+            x: (NSScreen.main!.frame.width - self.view.frame.width)/2,
+            y: (NSScreen.main!.frame.height - self.view.frame.height)/1.75
+        ))
+    }
 }
 
 private class SetupContainer: NSStackView {
-    private let pages: [NSView] = [SetupView_1(), SetupView_2(), SetupView_3(), SetupView_4()]
+    private let pages: [NSView] = [SetupView_1(), SetupView_2(), SetupView_3(), SetupView_4(), SetupView_end()]
     
     private var main: NSView = NSView()
     private var prevBtn: NSButton = NSButton()
@@ -377,6 +379,70 @@ private class SetupView_4: NSStackView {
         let title: NSTextField = TextView(frame: NSRect(x: 0, y: 0, width: container.frame.width, height: 22))
         title.alignment = .center
         title.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
+        title.stringValue = localizedString("Anonymous telemetry for better development decisions")
+        title.toolTip = localizedString("Anonymous telemetry for better development decisions")
+        title.isSelectable = false
+        
+        container.addRow(with: [title])
+        container.addRow(with: [self.content()])
+        
+        container.row(at: 0).height = 100
+        
+        self.addArrangedSubview(container)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func content() -> NSView {
+        let container: NSGridView = NSGridView()
+        
+        container.addRow(with: [self.option(
+            tag: 1,
+            state: telemetry.isEnabled,
+            text: localizedString("Share anonymous telemetry data")
+        )])
+        container.addRow(with: [self.option(
+            tag: 2,
+            state: !telemetry.isEnabled,
+            text: localizedString("Do not share anonymous telemetry data")
+        )])
+        
+        return container
+    }
+    
+    private func option(tag: Int, state: Bool, text: String) -> NSView {
+        let button: NSButton = NSButton(frame: NSRect(x: 0, y: 0, width: 30, height: 20))
+        button.setButtonType(.radio)
+        button.state = state ? .on : .off
+        button.title = text
+        button.action = #selector(self.toggle)
+        button.isBordered = false
+        button.isTransparent = false
+        button.target = self
+        button.tag = tag
+        
+        return button
+    }
+    
+    @objc private func toggle(_ sender: NSButton) {
+        telemetry.isEnabled = sender.tag == 1
+    }
+}
+
+private class SetupView_end: NSStackView {
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: setupSize.width, height: setupSize.height - 60))
+        
+        let container: NSGridView = NSGridView()
+        container.rowSpacing = 0
+        container.yPlacement = .center
+        container.xPlacement = .center
+        
+        let title: NSTextField = TextView(frame: NSRect(x: 0, y: 0, width: container.frame.width, height: 22))
+        title.alignment = .center
+        title.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
         title.stringValue = localizedString("The configuration is completed")
         title.toolTip = localizedString("The configuration is completed")
         title.isSelectable = false
@@ -392,13 +458,27 @@ private class SetupView_4: NSStackView {
         message.isSelectable = false
         
         let support: NSStackView = NSStackView(frame: NSRect(x: 0, y: 0, width: 160, height: 50))
-        support.spacing = 0
+        support.edgeInsets = NSEdgeInsets(top: 12, left: 0, bottom: 0, right: 0)
+        support.spacing = 12
         support.orientation = .horizontal
         
-        support.addArrangedSubview(supportButton(name: "GitHub Sponsors", image: "github", action: #selector(self.openGithub)))
-        support.addArrangedSubview(supportButton(name: "PayPal", image: "paypal", action: #selector(self.openPaypal)))
-        support.addArrangedSubview(supportButton(name: "Ko-fi", image: "ko-fi", action: #selector(self.openKofi)))
-        support.addArrangedSubview(supportButton(name: "Patreon", image: "patreon", action: #selector(self.openPatreon)))
+        let github = SupportButtonView(name: "GitHub Sponsors", image: "github", action: {
+            NSWorkspace.shared.open(URL(string: "https://github.com/sponsors/exelban")!)
+        })
+        let paypal = SupportButtonView(name: "PayPal", image: "paypal", action: {
+            NSWorkspace.shared.open(URL(string: "https://www.paypal.com/donate?hosted_button_id=3DS5JHDBATMTC")!)
+        })
+        let koFi = SupportButtonView(name: "Ko-fi", image: "ko-fi", action: {
+            NSWorkspace.shared.open(URL(string: "https://ko-fi.com/exelban")!)
+        })
+        let patreon = SupportButtonView(name: "Patreon", image: "patreon", action: {
+            NSWorkspace.shared.open(URL(string: "https://patreon.com/exelban")!)
+        })
+        
+        support.addArrangedSubview(github)
+        support.addArrangedSubview(paypal)
+        support.addArrangedSubview(koFi)
+        support.addArrangedSubview(patreon)
         
         content.addArrangedSubview(message)
         content.addArrangedSubview(support)
@@ -414,39 +494,57 @@ private class SetupView_4: NSStackView {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+}
+
+internal class SupportButtonView: NSButton {
+    internal var callback: (() -> Void) = {}
     
-    private func supportButton(name: String, image: String, action: Selector) -> NSButton {
-        let button = NSButtonWithPadding()
-        button.frame = CGRect(x: 0, y: 0, width: 24, height: 24)
-        button.verticalPadding = 16
-        button.horizontalPadding = 16
-        button.title = name
-        button.toolTip = name
-        button.bezelStyle = .regularSquare
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.imageScaling = .scaleNone
-        button.image = Bundle(for: type(of: self)).image(forResource: image)!
-        button.isBordered = false
-        button.target = self
-        button.focusRingType = .none
-        button.action = action
+    init(name: String, image: String, action: @escaping () -> Void) {
+        self.callback = action
         
-        return button
+        super.init(frame: NSRect(x: 0, y: 0, width: 30, height: 30))
+        
+        self.title = name
+        self.toolTip = name
+        self.bezelStyle = .regularSquare
+        self.translatesAutoresizingMaskIntoConstraints = false
+        self.imageScaling = .scaleProportionallyDown
+        self.image = Bundle(for: type(of: self)).image(forResource: image)!
+        self.isBordered = false
+        self.target = self
+        self.focusRingType = .none
+        self.action = #selector(self.click)
+        self.wantsLayer = true
+        self.alphaValue = 0.9
+        
+        self.addTrackingArea(NSTrackingArea(
+            rect: NSRect(x: 0, y: 0, width: self.frame.width, height: self.frame.height),
+            options: [NSTrackingArea.Options.activeAlways, NSTrackingArea.Options.mouseEnteredAndExited, NSTrackingArea.Options.activeInActiveApp],
+            owner: self,
+            userInfo: nil
+        ))
+        
+        NSLayoutConstraint.activate([
+            self.widthAnchor.constraint(equalToConstant: self.bounds.width),
+            self.heightAnchor.constraint(equalToConstant: self.bounds.height)
+        ])
     }
     
-    @objc private func openGithub(_ sender: NSButton) {
-        NSWorkspace.shared.open(URL(string: "https://github.com/sponsors/exelban")!)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
     
-    @objc private func openPaypal(_ sender: NSButton) {
-        NSWorkspace.shared.open(URL(string: "https://www.paypal.com/donate?hosted_button_id=3DS5JHDBATMTC")!)
+    public override func mouseEntered(with: NSEvent) {
+        self.alphaValue = 1
+        NSCursor.pointingHand.set()
     }
     
-    @objc private func openKofi(_ sender: NSButton) {
-        NSWorkspace.shared.open(URL(string: "https://ko-fi.com/exelban")!)
+    public override func mouseExited(with: NSEvent) {
+        self.alphaValue = 0.9
+        NSCursor.arrow.set()
     }
     
-    @objc private func openPatreon(_ sender: NSButton) {
-        NSWorkspace.shared.open(URL(string: "https://patreon.com/exelban")!)
+    @objc private func click() {
+        self.callback()
     }
 }

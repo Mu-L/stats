@@ -26,6 +26,8 @@
 "Open Battery settings" = "Open battery settings";
 "Bluetooth" = "Bluetooth";
 "Open Bluetooth settings" = "Open bluetooth settings";
+"Clock" = "Clock";
+"Open Clock settings" = "Open clock settings";
 
 // Words
 "Unknown" = "Unknown";
@@ -67,7 +69,37 @@
 "Square" = "Square";
 "Cube" = "Cube";
 "Logarithmic" = "Logarithmic";
+"Fixed scale" = "Fixed";
 "Cores" = "Cores";
+"Settings" = "Settings";
+"Name" = "Name";
+"Format" = "Format";
+"Turn off" = "Turn off";
+"Normal" = "Normal";
+"Warning" = "Warning";
+"Critical" = "Critical";
+"Usage" = "Usage";
+"2 minutes" = "2 minutes";
+"3 minutes" = "3 minutes";
+"10 minutes" = "10 minutes";
+"Import" = "Import";
+"Export" = "Export";
+"Separator" = "Separator";
+"Read" = "Read";
+"Write" = "Write";
+"Frequency" = "Frequency";
+"1 sec" = "1 sec";
+"2 sec" = "2 sec";
+"3 sec" = "3 sec";
+"5 sec" = "5 sec";
+"10 sec" = "10 sec";
+"15 sec" = "15 sec";
+"30 sec" = "30 sec";
+"60 sec" = "60 sec";
+"Save" = "Save";
+"Browse" = "Browse";
+"Run" = "Run";
+"Stop" = "Stop";
 
 // Setup
 "Stats Setup" = "Stats Setup";
@@ -87,6 +119,9 @@
 "Check for a new version every week (once a week)" = "Check for a new version every week (once a week)";
 "Check for a new version every month (once a month)" = "Check for a new version every month (once a month)";
 "Never check for updates (not recommended)" = "Never check for updates (not recommended)";
+"Anonymous telemetry for better development decisions" = "Anonymous telemetry for better development decisions";
+"Share anonymous telemetry data" = "Share anonymous telemetry data";
+"Do not share anonymous telemetry data" = "Do not share anonymous telemetry data";
 "The configuration is completed" = "The configuration is completed";
 "finish_setup_message" = "Everything is set up! \n The Stats is an open source tool, it's free and always will be. \n If you enjoy it you can support a project, it's always appreciated!";
 
@@ -96,6 +131,7 @@
 "Successfully updated" = "Successfully updated";
 "Stats was updated to v" = "Stats was updated to v%0";
 "Reset settings text" = "All application settings will be reset and the application will be restarted. Are you sure you want to do this?";
+"Support text" = "Thank you for using Stats!\n\n Maintaining and improving this open-source project takes time and resources. Your support helps us continue to provide a free and reliable application for everyone.\n\nIf you find Stats helpful, please consider making a contribution. Every little bit helps!";
 
 // Settings
 "Open Activity Monitor" = "Open Activity Monitor";
@@ -104,6 +140,9 @@
 "Close application" = "Close application";
 "Open application settings" = "Open application settings";
 "Open dashboard" = "Open dashboard";
+"No notifications available in this module" = "No notifications available in this module";
+"Open Calendar" = "Open Calendar";
+"Toggle the module" = "Toggle the module";
 
 // Application settings
 "Update application" = "Update application";
@@ -117,12 +156,20 @@
 "Show icon in dock" = "Show icon in dock";
 "Start at login" = "Start at login";
 "Build number" = "Build number";
+"Import settings" = "Import settings";
+"Export settings" = "Export settings";
 "Reset settings" = "Reset settings";
 "Pause the Stats" = "Pause the Stats";
 "Resume the Stats" = "Resume the Stats";
+"Combined modules" = "Combined modules";
+"Combined details" = "Combined details";
+"Spacing" = "Spacing";
+"Share anonymous telemetry" = "Share anonymous telemetry";
 
 // Dashboard
 "Serial number" = "Serial number";
+"Model identifier" = "Model identifier";
+"Production year" = "Production year";
 "Uptime" = "Uptime";
 "Number of cores" = "%0 cores";
 "Number of threads" = "%0 threads";
@@ -156,16 +203,24 @@
 "Network chart widget" = "Network chart";
 "Speed widget" = "Speed";
 "Battery widget" = "Battery";
-"Text widget" = "Text";
+"Stack widget" = "Stack";
 "Memory widget" = "Memory";
 "Static width" = "Static width";
 "Tachometer widget" = "Tachometer";
 "State widget" = "State widget";
+"Text widget" = "Text widget";
+"Battery details widget" = "Battery details widget";
 "Show symbols" = "Show symbols";
 "Label widget" = "Label";
 "Number of reads in the chart" = "Number of reads in the chart";
 "Color of download" = "Color of download";
 "Color of upload" = "Color of upload";
+"Monospaced font" = "Monospaced font";
+"Reverse order" = "Reverse order";
+"Chart history" = "Chart history";
+"Default color" = "Default";
+"Transparent when no activity" = "Transparent when no activity";
+"Constant color" = "Constant";
 
 // Module Kit
 "Open module settings" = "Open module settings";
@@ -176,18 +231,26 @@
 "Details" = "Details";
 "Top processes" = "Top processes";
 "Pictogram" = "Pictogram";
-"Module settings" = "Module settings";
-"Widget settings" = "Widget settings";
-"Popup settings" = "Popup settings";
+"Module" = "Module";
+"Widgets" = "Widgets";
+"Popup" = "Popup";
+"Notifications" = "Notifications";
 "Merge widgets" = "Merge widgets";
 "No available widgets to configure" = "No available widgets to configure";
 "No options to configure for the popup in this module" = "No options to configure for the popup in this module";
+"Process" = "Process";
+"Kill process" = "Kill process";
+"Keyboard shortcut" = "Keyboard shortcut";
+"Listening..." = "Listening...";
 
 // Modules
 "Number of top processes" = "Number of top processes";
 "Update interval for top processes" = "Update interval for top processes";
 "Notification level" = "Notification level";
 "Chart color" = "Chart color";
+"Main chart scaling" = "Main chart scaling";
+"Scale value" = "Scale value";
+"Text widget value" = "Text widget value";
 
 // CPU
 "CPU usage" = "CPU usage";
@@ -213,6 +276,14 @@
 "User color" = "User color";
 "Idle color" = "Idle color";
 "Cluster grouping" = "Cluster grouping";
+"Efficiency cores color" = "Efficiency cores color";
+"Performance cores color" = "Performance cores color";
+"Total load" = "Total load";
+"System load" = "System load";
+"User load" = "User load";
+"Efficiency cores load" = "Efficiency cores load";
+"Performance cores load" = "Performance cores load";
+"All cores" = "All cores";
 
 // GPU
 "GPU to show" = "GPU to show";
@@ -252,6 +323,9 @@
 "Wired color" = "Wired color";
 "Compressed color" = "Compressed color";
 "Free color" = "Free color";
+"Free memory (less than)" = "Free memory (less than)";
+"Swap size" = "Swap size";
+"Free RAM is" = "Free RAM is %0";
 
 // Disk
 "Show removable disks" = "Show removable disks";
@@ -262,6 +336,15 @@
 "Switch view" = "Switch view";
 "Disk utilization threshold" = "Disk utilization threshold";
 "Disk utilization is" = "Disk utilization is %0";
+"Read color" = "Read color";
+"Write color" = "Write color";
+"Disk usage" = "Disk usage";
+"Total read" = "Total read";
+"Total written" = "Total written";
+"Write speed" = "Write";
+"Read speed" = "Read";
+"Drives" = "Drives";
+"SMART data" = "SMART data";
 
 // Sensors
 "Temperature unit" = "Temperature unit";
@@ -274,6 +357,16 @@
 "Current" = "Current";
 "Energy" = "Energy";
 "Show unknown sensors" = "Show unknown sensors";
+"Install fan helper" = "Install fan helper";
+"Uninstall fan helper" = "Uninstall fan helper";
+"Fan value" = "Fan value";
+"Turn off fan" = "Turn off fan";
+"You are going to turn off the fan. This is not recommended action that can damage your mac, are you sure you want to do that?" = "You are going to turn off the fan. This is not recommended action that can damage your mac, are you sure you want to do that?";
+"Sensor threshold" = "Sensor threshold";
+"Left fan" = "Left";
+"Right fan" = "Right";
+"Fastest fan" = "Fastest";
+"Sensor to show" = "Sensor to show";
 
 // Network
 "Uploading" = "Upload";
@@ -307,6 +400,18 @@
 "Nonactive state color" = "Nonactive state color";
 "Connectivity host (ICMP)" = "Connectivity host (ICMP)";
 "Leave empty to disable the check" = "Leave empty to disable the check";
+"Connectivity history" = "Connectivity history";
+"Auto-refresh public IP address" = "Auto-refresh public IP address";
+"Every hour" = "Every hour";
+"Every 12 hours" = "Every 12 hours";
+"Every 24 hours" = "Every 24 hours";
+"Network activity" = "Network activity";
+"Last reset" = "Last reset %0 ago";
+"Latency" = "Latency";
+"Upload speed" = "Upload";
+"Download speed" = "Download";
+"Address" = "Address";
+"WiFi network" = "WiFi network";
 
 // Battery
 "Level" = "Level";
@@ -340,13 +445,26 @@
 "Hide additional information when full" = "Hide additional information when full";
 "Last charge" = "Last charge";
 "Capacity" = "Capacity";
-"maximum / designed" = "maximum / designed";
+"current / maximum / designed" = "current / maximum / designed";
 "Low power mode" = "Low power mode";
 "Percentage inside the icon" = "Percentage inside the icon";
+"Colorize battery" = "Colorize battery";
+"Charging current" = "Charging current";
+"Charging Voltage" = "Charging voltage";
+"Charger state inside the battery" = "Charger state inside the battery";
 
 // Bluetooth
 "Battery to show" = "Battery to show";
 "No Bluetooth devices are available" = "No Bluetooth devices are available";
+
+// Clock
+"Time zone" = "Time zone";
+"Local" = "Local";
+"Calendar" = "Calendar";
+"Local time" = "Local time";
+"Add new clock" = "Add new clock";
+"Delete selected clock" = "Delete selected clock";
+"Help with datetime format" = "Help with datetime format";
 
 // Colors
 "Based on utilization" = "Based on utilization";

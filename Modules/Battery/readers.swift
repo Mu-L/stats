@@ -39,10 +39,6 @@ internal class UsageReader: Reader<Battery_Usage> {
         CFRunLoopAddSource(self.loop, source, .defaultMode)
         
         self.read()
-        
-        if #available(macOS 12.0, *) {
-            NotificationCenter.default.addObserver(self, selector: #selector(self.lowModeChanged), name: Notification.Name.NSProcessInfoPowerStateDidChange, object: nil)
-        }
     }
     
     public override func stop() {
@@ -52,10 +48,6 @@ internal class UsageReader: Reader<Battery_Usage> {
         
         self.active = false
         CFRunLoopRemoveSource(runLoop, source, .defaultMode)
-    }
-    
-    deinit {
-        NotificationCenter.default.removeObserver(self)
     }
     
     public override func read() {
@@ -69,11 +61,10 @@ internal class UsageReader: Reader<Battery_Usage> {
         for ps in psList {
             if let list = IOPSGetPowerSourceDescription(psInfo, ps).takeUnretainedValue() as? [String: Any] {
                 self.usage.powerSource = list[kIOPSPowerSourceStateKey] as? String ?? "AC Power"
+                self.usage.isBatteryPowered = self.usage.powerSource == "Battery Power"
                 self.usage.isCharged = list[kIOPSIsChargedKey] as? Bool ?? false
                 self.usage.isCharging = self.getBoolValue("IsCharging" as CFString) ?? false
-                if #available(macOS 12.0, *) {
-                    self.usage.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
-                }
+                self.usage.optimizedChargingEngaged = list["Optimized Battery Charging Engaged"] as? Int == 1
                 self.usage.level = Double(list[kIOPSCurrentCapacityKey] as? Int ?? 0) / 100
                 
                 if let time = list[kIOPSTimeToEmptyKey] as? Int {
@@ -89,6 +80,7 @@ internal class UsageReader: Reader<Battery_Usage> {
                 
                 self.usage.cycles = self.getIntValue("CycleCount" as CFString) ?? 0
                 
+                self.usage.currentCapacity = self.getIntValue("AppleRawCurrentCapacity" as CFString) ?? 0
                 self.usage.designedCapacity = self.getIntValue("DesignCapacity" as CFString) ?? 1
                 self.usage.maxCapacity = self.getIntValue((isARM ? "AppleRawMaxCapacity" : "MaxCapacity") as CFString) ?? 1
                 if !isARM {
@@ -110,6 +102,11 @@ internal class UsageReader: Reader<Battery_Usage> {
                     }
                 }
                 self.usage.ACwatts = ACwatts
+                
+                if let chargerData = self.getChargerData() {
+                    self.usage.chargingCurrent = chargerData["ChargingCurrent"] as? Int ?? 0
+                    self.usage.chargingVoltage = chargerData["ChargingVoltage"] as? Int ?? 0
+                }
                 
                 self.callback(self.usage)
             }
@@ -151,11 +148,11 @@ internal class UsageReader: Reader<Battery_Usage> {
         return nil
     }
     
-    @objc private func lowModeChanged() {
-        if #available(macOS 12.0, *) {
-            self.usage.isLowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
-            self.callback(self.usage)
+    private func getChargerData() -> [String: Any]? {
+        if let chargerData = IORegistryEntryCreateCFProperty(service, "ChargerData" as CFString, kCFAllocatorDefault, 0) {
+            return chargerData.takeRetainedValue() as? [String: Any]
         }
+        return nil
     }
 }
 
@@ -176,7 +173,6 @@ public class ProcessReader: Reader<[TopProcess]> {
         }
         
         let task = Process()
-        task.launchPath = "/bin/ps"
         task.launchPath = "/usr/bin/top"
         task.arguments = ["-o", "power", "-l", "2", "-n", "\(self.numberOfProcesses)", "-stats", "pid,command,power"]
         
@@ -198,33 +194,27 @@ public class ProcessReader: Reader<[TopProcess]> {
             return
         }
         
-        let output = String(decoding: outputData.advanced(by: outputData.count/2), as: UTF8.self)
-        if output.isEmpty {
-            return
-        }
+        let output = String(data: outputData.advanced(by: outputData.count/2), encoding: .utf8)
+        guard let output, !output.isEmpty else { return }
         
         var processes: [TopProcess] = []
-        output.enumerateLines { (line, _) -> Void in
+        output.enumerateLines { (line, _) in
             if line.matches("^\\d+ *[^(\\d)]*\\d+\\.*\\d* *$") {
-                var str = line.trimmingCharacters(in: .whitespaces)
-                
-                let pidString = str.findAndCrop(pattern: "^\\d+")
-                let usageString = str.findAndCrop(pattern: " +[0-9]+.*[0-9]*$")
-                let command = str.trimmingCharacters(in: .whitespaces)
-                
-                let pid = Int(pidString) ?? 0
-                guard let usage = Double(usageString.filter("01234567890.".contains)) else {
+                let str = line.trimmingCharacters(in: .whitespaces)
+                let pidFind = str.findAndCrop(pattern: "^\\d+")
+                let usageFind = pidFind.remain.findAndCrop(pattern: " +[0-9]+.*[0-9]*$")
+                let command = usageFind.remain.trimmingCharacters(in: .whitespaces)
+                let pid = Int(pidFind.cropped) ?? 0
+                guard let usage = Double(usageFind.cropped.filter("01234567890.".contains)) else {
                     return
                 }
                 
-                var name: String? = nil
-                var icon: NSImage? = nil
-                if let app = NSRunningApplication(processIdentifier: pid_t(pid) ) {
-                    name = app.localizedName ?? nil
-                    icon = app.icon
+                var name: String = command
+                if let app = NSRunningApplication(processIdentifier: pid_t(pid)), let n = app.localizedName {
+                    name = n
                 }
                 
-                processes.append(TopProcess(pid: pid, command: command, name: name, usage: usage, icon: icon))
+                processes.append(TopProcess(pid: pid, name: name, usage: usage))
             }
         }
         

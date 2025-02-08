@@ -26,6 +26,8 @@
 "Open Battery settings" = "Otwórz ustawienia baterii";
 "Bluetooth" = "Bluetooth";
 "Open Bluetooth settings" = "Otwórz ustawienia bluetooth";
+"Clock" = "Zegar";
+"Open Clock settings" = "Otwórz ustawienia zegara";
 
 // Words
 "Unknown" = "Nieznany";
@@ -67,7 +69,33 @@
 "Square" = "Kwadratowe";
 "Cube" = "Kubiczne";
 "Logarithmic" = "Logarytmiczne";
+"Fixed scale" = "Stałe";
 "Cores" = "Rdzeni";
+"Settings" = "Ustawienia";
+"Name" = "Nazwa";
+"Format" = "Format";
+"Turn off" = "Wyłączyć";
+"Normal" = "Normalny";
+"Warning" = "Ostrzeżenie";
+"Critical" = "Krytyczny";
+"Usage" = "Wykorzystanie";
+"2 minutes" = "2 minuty";
+"3 minutes" = "3 minuty";
+"10 minutes" = "10 minut";
+"Import" = "Import";
+"Export" = "Eksport";
+"Separator" = "Separator";
+"Read" = "Odczyt";
+"Write" = "Zapis";
+"Frequency" = "Częstotliwość";
+"1 sec" = "1 sek";
+"2 sec" = "2 sek";
+"3 sec" = "3 sek";
+"5 sec" = "5 sek";
+"10 sec" = "10 sek";
+"15 sec" = "15 sek";
+"30 sec" = "30 sek";
+"60 sec" = "60 sek";
 
 // Setup
 "Stats Setup" = "Konfiguracja Stats";
@@ -87,6 +115,9 @@
 "Check for a new version every week (once a week)" = "Sprawdzaj nową wersję co tydzień (raz w tygodniu)";
 "Check for a new version every month (once a month)" = "Sprawdzaj nową wersję co miesiąc (raz w miesiącu)";
 "Never check for updates (not recommended)" = "Nigdy nie sprawdzaj czy są aktualizacje (niezalecane)";
+"Anonymous telemetry for better development decisions" = "Anonimowe dane telemetryczne aby podejmować lepsze decyzje rozwojowe";
+"Share anonymous telemetry data" = "Udostępniaj anonimowe dane telemetryczne";
+"Do not share anonymous telemetry data" = "Nie udostępniaj anonimowych danych telemetrycznych";
 "The configuration is completed" = "Konfiguracja zakończona";
 "finish_setup_message" = "Wszystko gotowe! \n Stats to narzędzie open source, które jest bezpłatne i zawsze takie będzie. \n Jeśli Ci się spodoba, możesz wesprzeć projekt, to jest zawsze mile widziane!";
 
@@ -96,6 +127,7 @@
 "Successfully updated" = "Zaktualizowano pomyślnie";
 "Stats was updated to v" = "Stats został zaktualizowany do v%0";
 "Reset settings text" = "Wszystkie ustawienia aplikacji zostaną zresetowane, a aplikacja zostanie uruchomiona ponownie. Czy na pewno chcesz to zrobić?";
+"Support text" = "Dziękujemy za korzystanie ze Stats! \n\n Utrzymanie i ulepszanie tego open-source projektu wymaga czasu i zasobów. Twoje wsparcie pomaga nam nadal dostarczać bezpłatną i niezawodną aplikację dla każdego.\n\nJeśli uważasz, że Stats jest pomocny, rozważ dokonanie wpłaty. Każda drobnostka pomaga!";
 
 // Settings
 "Open Activity Monitor" = "Otwórz Monitor Aktywności";
@@ -104,6 +136,9 @@
 "Close application" = "Zamknij program";
 "Open application settings" = "Otwórz ustawienia";
 "Open dashboard" = "Otwórz dashboard";
+"No notifications available in this module" = "W tym module nie są dostępne żadne powiadomienia";
+"Open Calendar" = "Otwórz kalendarz";
+"Toggle the module" = "Przełącz moduł";
 
 // Application settings
 "Update application" = "Aktualizuj aplikacje";
@@ -117,12 +152,20 @@
 "Show icon in dock" = "Pokazuj ikonę w docku";
 "Start at login" = "Uruchom przy logowaniu";
 "Build number" = "Numer kompilacji";
-"Reset settings" = "Resetowanie ustawień";
+"Import settings" = "Importuj ustawienia";
+"Export settings" = "Eksportuj ustawienia";
+"Reset settings" = "Resetuj ustawienia";
 "Pause the Stats" = "Wstrzymaj Stats";
 "Resume the Stats" = "Wznów Stats";
+"Combined modules" = "Połączone moduły";
+"Combined details" = "Połączone okno";
+"Spacing" = "Rozstaw";
+"Share anonymous telemetry" = "Udostępnij anonimową telemetrię";
 
 // Dashboard
 "Serial number" = "Numer seryjny";
+"Model identifier" = "Identyfikator modelu";
+"Production year" = "Rok produkcji";
 "Uptime" = "Czas pracy";
 "Number of cores" = "%0 rdzeni";
 "Number of threads" = "%0 wątków";
@@ -156,16 +199,24 @@
 "Network chart widget" = "Wykres sieciowy";
 "Speed widget" = "Prędkość";
 "Battery widget" = "Bateria";
-"Text widget" = "Tekst";
+"Stack widget" = "Stos";
 "Memory widget" = "Pamięć";
 "Static width" = "Statyczna szerokość";
 "Tachometer widget" = "Tachometr";
 "State widget" = "Stan";
+"Text widget" = "Tekst";
+"Battery details widget" = "Widżet szczegółów baterii";
 "Show symbols" = "Pokaż symbole";
 "Label widget" = "Etykieta";
 "Number of reads in the chart" = "Liczba odczytów na wykresie";
 "Color of download" = "Kolor pobrania";
 "Color of upload" = "Kolor wysyłki";
+"Monospaced font" = "Czcionka o stałej szerokości";
+"Reverse order" = "Odwrotna kolejność";
+"Chart history" = "Historia wykresu";
+"Default color" = "Domyślny";
+"Transparent when no activity" = "Przejrzysty gdy nie ma żadnej aktywności";
+"Constant color" = "Stały";
 
 // Module Kit
 "Open module settings" = "Otwórz ustawienia modułu";
@@ -176,18 +227,26 @@
 "Details" = "Szczegóły";
 "Top processes" = "Top procesy";
 "Pictogram" = "Ikonka";
-"Module settings" = "Ustawienia modułu";
-"Widget settings" = "Ustawienia widżetu";
-"Popup settings" = "Ustawienia okienka";
-"Merge widgets" = "Pąłącz widżety";
+"Module" = "Moduł";
+"Widgets" = "Widżety";
+"Popup" = "Okienko";
+"Notifications" = "Powiadomienia";
+"Merge widgets" = "Połącz widżety";
 "No available widgets to configure" = "Brak dostępnych widżetów do konfiguracji";
 "No options to configure for the popup in this module" = "Brak opcji do skonfigurowania dla okienka w tym module";
+"Process" = "Proces";
+"Kill process" = "Zamknąć proces";
+"Keyboard shortcut" = "Skrót klawiszowy";
+"Listening..." = "Oczekuje...";
 
 // Modules
 "Number of top processes" = "Liczba procesów";
 "Update interval for top processes" = "Interwał odświeżania procesów";
 "Notification level" = "Poziom powiadomienia";
 "Chart color" = "Kolor wykresu";
+"Main chart scaling" = "Skalowanie wykresu głównego";
+"Scale value" = "Wartość skali";
+"Text widget value" = "Wartość widżetu tekstowego";
 
 // CPU
 "CPU usage" = "Obciążenie procesora";
@@ -213,6 +272,14 @@
 "User color" = "Kolor użytkownika";
 "Idle color" = "Nieaktywny kolor";
 "Cluster grouping" = "Grupowanie klastrów";
+"Efficiency cores color" = "Kolor rdzeni energooszczędnych";
+"Performance cores color" = "Kolor rdzeni wydajnościowych";
+"Total load" = "Całkowite obciążenie";
+"System load" = "Obciążenie systemu";
+"User load" = "Obciążenie użytkownika";
+"Efficiency cores load" = "Obciążenie rdzeni energooszczędnych";
+"Performance cores load" = "Obciążenie rdzeni wydajnościowych";
+"All cores" = "Wszystkie rdzenie";
 
 // GPU
 "GPU to show" = "GPU do wyświetlenia";
@@ -252,6 +319,9 @@
 "Wired color" = "Kolor układowej przestrzeni";
 "Compressed color" = "Kolor skompresowanej przestrzeni";
 "Free color" = "Kolor wolnej przestrzeni";
+"Free memory (less than)" = "Wolna pamięć (mniej niż)";
+"Swap size" = "Rozmiar swap";
+"Free RAM is" = "Wolna pamięć RAM %0";
 
 // Disk
 "Show removable disks" = "Pokaż dyski wymienne";
@@ -262,6 +332,15 @@
 "Switch view" = "Przełącz widok";
 "Disk utilization threshold" = "Próg wykorzystania dysku";
 "Disk utilization is" = "Wykorzystanie dysku %0";
+"Read color" = "Kolor odczytu";
+"Write color" = "Kolor zapisu";
+"Disk usage" = "Użycie dysku";
+"Total read" = "Całkowity odczyt";
+"Total written" = "Całkowity zapis";
+"Write speed" = "Zapis";
+"Read speed" = "Odczyt";
+"Drives" = "Dyski";
+"SMART data" = "SMART dane";
 
 // Sensors
 "Temperature unit" = "Jednostka temperatury";
@@ -274,6 +353,16 @@
 "Current" = "Prąd";
 "Energy" = "Energia";
 "Show unknown sensors" = "Pokaż nieznane czujniki";
+"Install fan helper" = "Zainstaluj narzędzie do wentylatora";
+"Uninstall fan helper" = "Odinstaluj narzędzie do wentylatora";
+"Fan value" = "Wartość wentylatora";
+"Turn off fan" = "Wyłączyć wentylator";
+"You are going to turn off the fan. This is not recommended action that can damage your mac, are you sure you want to do that?" = "Zamierzasz wyłączyć wentylator. To nie jest zalecana czynność, która może spowodować uszkodzenie komputera Mac. Czy na pewno chcesz to zrobić?";
+"Sensor threshold" = "Próg czujnika";
+"Left fan" = "Lewy";
+"Right fan" = "Prawy";
+"Fastest fan" = "Najszybszy";
+"Sensor to show" = "Aktywny czujnik";
 
 // Network
 "Uploading" = "Wysyłanie";
@@ -307,6 +396,18 @@
 "Nonactive state color" = "Kolor stanu nieaktywnego";
 "Connectivity host (ICMP)" = "Host łączności (ICMP)";
 "Leave empty to disable the check" = "Pozostaw puste, aby wyłączyć sprawdzanie";
+"Connectivity history" = "Historia łączności";
+"Auto-refresh public IP address" = "Automatyczne odświeżanie adresu IP";
+"Every hour" = "Co godzinę";
+"Every 12 hours" = "Co 12 godzin";
+"Every 24 hours" = "Co 24 godzin";
+"Network activity" = "Aktywność sieciowa";
+"Last reset" = "Ostatni reset %0 temu";
+"Latency" = "Opóźnienie";
+"Upload speed" = "Wysyłka";
+"Download speed" = "Pobranie";
+"Address" = "Adres";
+"WiFi network" = "Sieć WiFi";
 
 // Battery
 "Level" = "Poziom naładowania";
@@ -340,13 +441,26 @@
 "Hide additional information when full" = "Ukryj dodatkowe informacje, gdy bateria jest naładowana";
 "Last charge" = "Ostatnie ładowanie";
 "Capacity" = "Pojemność";
-"maximum / designed" = "maksymalna / zaprojektowana";
+"current / maximum / designed" = "aktualna / maksymalna / zaprojektowana";
 "Low power mode" = "Niskie zużycie energii";
 "Percentage inside the icon" = "Procent wewnątrz ikony";
+"Colorize battery" = "Kolorowanie baterii";
+"Charging current" = "Prąd ładowania";
+"Charging Voltage" = "Napięcie ładowania";
+"Charger state inside the battery" = "Stan ładowania wewnątrz akumulatora";
 
 // Bluetooth
 "Battery to show" = "Bateria do wyświetlenia";
 "No Bluetooth devices are available" = "Brak dostępnych urządzeń Bluetooth";
+
+// Clock
+"Time zone" = "Strefa czasowa";
+"Local" = "Lokalna";
+"Calendar" = "Kalendarz";
+"Local time" = "Czas lokalny";
+"Add new clock" = "Dodaj nowy zegar";
+"Delete selected clock" = "Usuń wybrany zegar";
+"Help with datetime format" = "Pomoc z formatem daty i godziny";
 
 // Colors
 "Based on utilization" = "Na podstawie wykorzystania";

@@ -12,12 +12,11 @@
 import Cocoa
 import Kit
 
-internal class Popup: NSStackView, Popup_p {
-    public var sizeCallback: ((NSSize) -> Void)? = nil
+internal class Popup: PopupWrapper {
     private let emptyView: EmptyView = EmptyView(height: 30, isHidden: false, msg: localizedString("No Bluetooth devices are available"))
     
     public init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 30))
+        super.init(ModuleType.bluetooth, frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 30))
         
         self.orientation = .vertical
         self.spacing = Constants.Popup.margins
@@ -61,12 +60,6 @@ internal class Popup: NSStackView, Popup_p {
             }
         }
     }
-    
-    // MARK: - Settings
-    
-    public func settings() -> NSView? {
-        return nil
-    }
 }
 
 internal class BLEView: NSStackView {
@@ -87,6 +80,7 @@ internal class BLEView: NSStackView {
         self.alignment = .centerY
         self.spacing = 0
         self.wantsLayer = true
+        self.edgeInsets = NSEdgeInsets(top: 0, left: 5, bottom: 0, right: 5)
         self.layer?.cornerRadius = 2
         
         let nameView: NSTextField = TextView(frame: NSRect(x: 0, y: 0, width: 0, height: 16))
@@ -107,7 +101,7 @@ internal class BLEView: NSStackView {
     }
     
     override func updateLayer() {
-        self.layer?.backgroundColor = isDarkMode ? NSColor(hexString: "#111111", alpha: 0.25).cgColor : NSColor(hexString: "#f5f5f5", alpha: 1).cgColor
+        self.layer?.backgroundColor = (isDarkMode ? NSColor(red: 17/255, green: 17/255, blue: 17/255, alpha: 0.25) : NSColor(red: 245/255, green: 245/255, blue: 245/255, alpha: 1)).cgColor
     }
     
     public func update(_ batteryLevel: [KeyValue_t]) {

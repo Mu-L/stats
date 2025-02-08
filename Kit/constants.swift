@@ -18,11 +18,12 @@ public struct Popup_c_s {
     public let spacing: CGFloat = 2
     public let headerHeight: CGFloat = 42
     public let separatorHeight: CGFloat = 30
+    public let portalHeight: CGFloat = 120
 }
 
 public struct Settings_c_s {
-    public let width: CGFloat = 539
-    public let height: CGFloat = 479
+    public let width: CGFloat = 540
+    public let height: CGFloat = 480
     public let margin: CGFloat = 10
     public let row: CGFloat = 30
 }
@@ -53,4 +54,33 @@ public struct Constants {
     public static let Widget: Widget_c_s = Widget_c_s()
     
     public static let defaultProcessIcon = NSWorkspace.shared.icon(forFile: "/bin/bash")
+}
+
+public enum ModuleType: Int {
+    case CPU
+    case RAM
+    case GPU
+    case disk
+    case sensors
+    case network
+    case battery
+    case bluetooth
+    case clock
+    
+    case combined
+    
+    public var stringValue: String {
+        switch self {
+        case .CPU: return "CPU"
+        case .RAM: return "RAM"
+        case .GPU: return "GPU"
+        case .disk: return "Disk"
+        case .sensors: return "Sensors"
+        case .network: return "Network"
+        case .battery: return "Battery"
+        case .bluetooth: return "Bluetooth"
+        case .clock: return "Clock"
+        case .combined: return ""
+        }
+    }
 }

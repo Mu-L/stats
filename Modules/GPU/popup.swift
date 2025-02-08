@@ -12,11 +12,9 @@
 import Cocoa
 import Kit
 
-internal class Popup: NSStackView, Popup_p {
-    public var sizeCallback: ((NSSize) -> Void)? = nil
-    
+internal class Popup: PopupWrapper {
     public init() {
-        super.init(frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
+        super.init(ModuleType.GPU, frame: NSRect(x: 0, y: 0, width: Constants.Popup.width, height: 0))
         
         self.orientation = .vertical
         self.spacing = Constants.Popup.margins
@@ -48,7 +46,7 @@ internal class Popup: NSStackView, Popup_p {
     
     private func recalculateHeight() {
         let h = self.arrangedSubviews.map({ $0.bounds.height + self.spacing }).reduce(0, +) - self.spacing
-        if self.frame.size.height != h {
+        if self.frame.size.height != h && h >= 0 {
             self.setFrameSize(NSSize(width: self.frame.width, height: h))
             self.sizeCallback?(self.frame.size)
         }
@@ -56,8 +54,17 @@ internal class Popup: NSStackView, Popup_p {
     
     // MARK: - Settings
     
-    public func settings() -> NSView? {
-        return nil
+    public override func settings() -> NSView? {
+        let view = SettingsContainerView()
+        
+        view.addArrangedSubview(PreferencesSection([
+            PreferencesRow(localizedString("Keyboard shortcut"), component: KeyboardShartcutView(
+                callback: self.setKeyboardShortcut,
+                value: self.keyboardShortcut
+            ))
+        ]))
+        
+        return view
     }
 }
 
@@ -110,7 +117,7 @@ private class GPUView: NSStackView {
     }
     
     override func updateLayer() {
-        self.layer?.backgroundColor = isDarkMode ? NSColor(hexString: "#111111", alpha: 0.25).cgColor : NSColor(hexString: "#f5f5f5", alpha: 1).cgColor
+        self.layer?.backgroundColor = (isDarkMode ? NSColor(red: 17/255, green: 17/255, blue: 17/255, alpha: 0.25) : NSColor(red: 245/255, green: 245/255, blue: 245/255, alpha: 1)).cgColor
     }
     
     private func title() -> NSView {
@@ -169,8 +176,8 @@ private class GPUView: NSStackView {
         charts.distribution = .fillEqually
         self.chartRow = charts
         
-        self.addStats(id: "temperature", self.value.temperature)
-        self.addStats(id: "utilization", self.value.utilization)
+        self.addStats(id: "GPU temperature", self.value.temperature)
+        self.addStats(id: "GPU utilization", self.value.utilization)
         self.addStats(id: "Render utilization", self.value.renderUtilization)
         self.addStats(id: "Tiler utilization", self.value.tilerUtilization)
         
@@ -189,9 +196,7 @@ private class GPUView: NSStackView {
     }
     
     private func addStats(id: String, _ val: Double? = nil) {
-        guard let value = val else {
-            return
-        }
+        guard let value = val else { return }
         
         var circle: HalfCircleGraphView
         var chart: LineChartView
@@ -201,10 +206,10 @@ private class GPUView: NSStackView {
         } else {
             circle = HalfCircleGraphView(frame: NSRect(x: 0, y: 0, width: circleSize, height: circleSize))
             circle.id = id
-            circle.toolTip = localizedString("GPU \(id)")
+            circle.toolTip = localizedString(id)
             if let row = self.circleRow {
                 row.setFrameSize(NSSize(width: row.frame.width, height: self.circleSize + 20))
-                row.edgeInsets = NSEdgeInsets(top: 10, left: 0, bottom: 0, right: 0)
+                row.edgeInsets = NSEdgeInsets(top: 10, left: 10, bottom: 0, right: 10)
                 row.heightAnchor.constraint(equalToConstant: row.bounds.height).isActive = true
                 row.addArrangedSubview(circle)
             }
@@ -218,7 +223,7 @@ private class GPUView: NSStackView {
             chart.layer?.backgroundColor = NSColor.lightGray.withAlphaComponent(0.1).cgColor
             chart.layer?.cornerRadius = 3
             chart.id = id
-            chart.toolTip = localizedString("GPU \(id)")
+            chart.toolTip = localizedString(id)
             if let row = self.chartRow {
                 row.setFrameSize(NSSize(width: row.frame.width, height: self.chartSize + 20))
                 row.spacing = Constants.Popup.margins
@@ -233,17 +238,19 @@ private class GPUView: NSStackView {
             }
         }
         
-        if id == "temperature" {
+        if id == "GPU temperature" {
             circle.setValue(value)
-            circle.setText(Temperature(value))
+            circle.setText(temperature(value))
+            circle.toolTip = "\(localizedString(id)): \(temperature(value))"
             chart.suffix = UnitTemperature.current.symbol
             
             if self.temperatureChart == nil {
                 self.temperatureChart = chart
             }
-        } else if id == "utilization" {
+        } else if id == "GPU utilization" {
             circle.setValue(value)
             circle.setText("\(Int(value*100))%")
+            circle.toolTip = "\(localizedString(id)): \(Int(value*100))%"
             
             if self.utilizationChart == nil {
                 self.utilizationChart = chart
@@ -251,6 +258,7 @@ private class GPUView: NSStackView {
         } else if id == "Render utilization" {
             circle.setValue(value)
             circle.setText("\(Int(value*100))%")
+            circle.toolTip = "\(localizedString(id)): \(Int(value*100))%"
             
             if self.renderUtilizationChart == nil {
                 self.renderUtilizationChart = chart
@@ -258,6 +266,7 @@ private class GPUView: NSStackView {
         } else if id == "Tiler utilization" {
             circle.setValue(value)
             circle.setText("\(Int(value*100))%")
+            circle.toolTip = "\(localizedString(id)): \(Int(value*100))%"
             
             if self.tilerUtilizationChart == nil {
                 self.tilerUtilizationChart = chart
@@ -272,14 +281,18 @@ private class GPUView: NSStackView {
             self.stateView?.layer?.backgroundColor = (gpu.state ? NSColor.systemGreen : NSColor.systemRed).cgColor
             self.stateView?.toolTip = localizedString("GPU \(gpu.state ? "enabled" : "disabled")")
             
-            self.addStats(id: "temperature", gpu.temperature)
-            self.addStats(id: "utilization", gpu.utilization)
+            self.addStats(id: "GPU temperature", gpu.temperature)
+            self.addStats(id: "GPU utilization", gpu.utilization)
             self.addStats(id: "Render utilization", gpu.renderUtilization)
             self.addStats(id: "Tiler utilization", gpu.tilerUtilization)
         }
         
         if let value = gpu.temperature {
-            self.temperatureChart?.addValue(value/100)
+            if let temp = Double(temperature(value).replacingOccurrences(of: "C", with: "").replacingOccurrences(of: "F", with: "").digits) {
+                self.temperatureChart?.addValue(temp/100)
+            } else {
+                self.temperatureChart?.addValue(value)
+            }
         }
         if let value = gpu.utilization {
             self.utilizationChart?.addValue(value)
@@ -373,7 +386,7 @@ private class GPUDetails: NSView {
         }
         
         if let value = value.temperature {
-            let arr = keyValueRow("\(localizedString("Temperature")):", Temperature(Double(value)))
+            let arr = keyValueRow("\(localizedString("Temperature")):", Kit.temperature(Double(value)))
             self.temperature = arr.last
             grid.addRow(with: arr)
             num += 1
@@ -427,7 +440,7 @@ private class GPUDetails: NSView {
         }
         
         if let value = gpu.temperature {
-            self.temperature?.stringValue = Temperature(Double(value))
+            self.temperature?.stringValue = Kit.temperature(Double(value))
         }
         if let value = gpu.utilization {
             self.utilization?.stringValue = "\(Int(value*100))%"

@@ -11,6 +11,7 @@
 
 import Cocoa
 import Kit
+import WidgetKit
 
 public typealias GPU_type = String
 public enum GPU_types: GPU_type {
@@ -21,7 +22,7 @@ public enum GPU_types: GPU_type {
     case discrete = "d"
 }
 
-public struct GPU_Info {
+public struct GPU_Info: Codable {
     public let id: String
     public let type: GPU_type
     
@@ -40,34 +41,34 @@ public struct GPU_Info {
     public var renderUtilization: Double? = nil
     public var tilerUtilization: Double? = nil
     
-    init(id: String, type: GPU_type, IOClass: String, vendor: String? = nil, model: String, cores: Int?) {
+    init(id: String, type: GPU_type, IOClass: String, vendor: String? = nil, model: String, cores: Int?, utilization: Double? = nil, render: Double? = nil, tiler: Double? = nil) {
         self.id = id
         self.type = type
         self.IOClass = IOClass
         self.vendor = vendor
         self.model = model
         self.cores = cores
+        self.utilization = utilization
+        self.renderUtilization = render
+        self.tilerUtilization = tiler
     }
 }
 
-public struct GPUs: value_t {
+public struct GPUs: Codable {
     public var list: [GPU_Info] = []
     
     internal func active() -> [GPU_Info] {
         return self.list.filter{ $0.state && $0.utilization != nil }.sorted{ $0.utilization ?? 0 > $1.utilization ?? 0 }
     }
-    
-    public var widgetValue: Double {
-        get {
-            return list.isEmpty ? 0 : (list[0].utilization ?? 0)
-        }
-    }
 }
 
 public class GPU: Module {
+    private let popupView: Popup
+    private let settingsView: Settings
+    private let portalView: Portal
+    private let notificationsView: Notifications
+    
     private var infoReader: InfoReader? = nil
-    private var settingsView: Settings
-    private var popupView: Popup = Popup()
     
     private var selectedGPU: String = ""
     private var notificationLevelState: Bool = false
@@ -78,51 +79,43 @@ public class GPU: Module {
             return Store.shared.bool(key: "\(self.config.name)_showType", defaultValue: false)
         }
     }
-    private var notificationLevel: String {
-        get {
-            return Store.shared.string(key: "\(self.config.name)_notificationLevel", defaultValue: "Disabled")
-        }
-    }
     
     public init() {
-        self.settingsView = Settings("GPU")
+        self.popupView = Popup()
+        self.settingsView = Settings(.GPU)
+        self.portalView = Portal(.GPU)
+        self.notificationsView = Notifications(.GPU)
         
         super.init(
+            moduleType: .GPU,
             popup: self.popupView,
-            settings: self.settingsView
+            settings: self.settingsView,
+            portal: self.portalView,
+            notifications: self.notificationsView
         )
         guard self.available else { return }
         
-        self.infoReader = InfoReader()
+        self.infoReader = InfoReader(.GPU) { [weak self] value in
+            self?.infoCallback(value)
+        }
         self.selectedGPU = Store.shared.string(key: "\(self.config.name)_gpu", defaultValue: self.selectedGPU)
         
-        self.infoReader?.callbackHandler = { [unowned self] value in
-            self.infoCallback(value)
+        self.settingsView.selectedGPUHandler = { [weak self] value in
+            self?.selectedGPU = value
+            self?.infoReader?.read()
         }
-        self.infoReader?.readyCallback = { [unowned self] in
-            self.readyHandler()
+        self.settingsView.setInterval = { [weak self] value in
+            self?.infoReader?.setInterval(value)
         }
-        
-        self.settingsView.selectedGPUHandler = { [unowned self] value in
-            self.selectedGPU = value
-            self.infoReader?.read()
-        }
-        self.settingsView.setInterval = { [unowned self] value in
-            self.infoReader?.setInterval(value)
-        }
-        self.settingsView.callback = {
-            self.infoReader?.read()
+        self.settingsView.callback = { [weak self] in
+            self?.infoReader?.read()
         }
         
-        if let reader = self.infoReader {
-            self.addReader(reader)
-        }
+        self.setReaders([self.infoReader])
     }
     
     private func infoCallback(_ raw: GPUs?) {
-        guard raw != nil && !raw!.list.isEmpty, let value = raw, self.enabled else {
-            return
-        }
+        guard raw != nil && !raw!.list.isEmpty, let value = raw, self.enabled else { return }
         
         DispatchQueue.main.async(execute: {
             self.popupView.infoCallback(value)
@@ -138,9 +131,10 @@ public class GPU: Module {
             return
         }
         
-        self.checkNotificationLevel(utilization)
+        self.portalView.callback(selectedGPU)
+        self.notificationsView.usageCallback(utilization)
         
-        self.menuBar.widgets.filter{ $0.isActive }.forEach { (w: Widget) in
+        self.menuBar.widgets.filter{ $0.isActive }.forEach { (w: SWidget) in
             switch w.item {
             case let widget as Mini:
                 widget.setValue(utilization)
@@ -154,31 +148,11 @@ public class GPU: Module {
             default: break
             }
         }
-    }
-    
-    private func checkNotificationLevel(_ value: Double) {
-        guard self.notificationLevel != "Disabled", let level = Double(self.notificationLevel) else { return }
         
-        if let id = self.notificationID, value < level && self.notificationLevelState {
-            if #available(macOS 10.14, *) {
-                removeNotification(id)
-            } else {
-                removeNSNotification(id)
-            }
-            
-            self.notificationID = nil
-            self.notificationLevelState = false
-        } else if value >= level && !self.notificationLevelState {
-            let title = localizedString("GPU usage threshold")
-            let subtitle = localizedString("GPU usage is", "\(Int((value)*100))%")
-            
-            if #available(macOS 10.14, *) {
-                self.notificationID = showNotification(title: title, subtitle: subtitle)
-            } else {
-                self.notificationID = showNSNotification(title: title, subtitle: subtitle)
-            }
-            
-            self.notificationLevelState = true
+        if #available(macOS 11.0, *) {
+            guard let blobData = try? JSONEncoder().encode(selectedGPU) else { return }
+            self.userDefaults?.set(blobData, forKey: "GPU@InfoReader")
+            WidgetCenter.shared.reloadTimelines(ofKind: GPU_entry.kind)
         }
     }
 }

@@ -11,16 +11,38 @@
 
 import Cocoa
 import Kit
-import IOKit
-import Darwin
+import IOKit.storage
+
+let kIONVMeSMARTUserClientTypeID = CFUUIDGetConstantUUIDWithBytes(nil,
+                                                                  0xAA, 0x0F, 0xA6, 0xF9,
+                                                                  0xC2, 0xD6, 0x45, 0x7F,
+                                                                  0xB1, 0x0B, 0x59, 0xA1,
+                                                                  0x32, 0x53, 0x29, 0x2F
+)
+let kIONVMeSMARTInterfaceID = CFUUIDGetConstantUUIDWithBytes(nil,
+                                                             0xCC, 0xD1, 0xDB, 0x19,
+                                                             0xFD, 0x9A, 0x4D, 0xAF,
+                                                             0xBF, 0x95, 0x12, 0x45,
+                                                             0x4B, 0x23, 0x0A, 0xB6
+)
+let kIOCFPlugInInterfaceID = CFUUIDGetConstantUUIDWithBytes(nil,
+                                                            0xC2, 0x44, 0xE8, 0x58,
+                                                            0x10, 0x9C, 0x11, 0xD4,
+                                                            0x91, 0xD4, 0x00, 0x50,
+                                                            0xE4, 0xC6, 0x42, 0x6F
+)
 
 internal class CapacityReader: Reader<Disks> {
     internal var list: Disks = Disks()
     
+    private var SMART: Bool {
+        Store.shared.bool(key: "\(ModuleType.disk.stringValue)_SMART", defaultValue: true)
+    }
+    
     public override func read() {
         let keys: [URLResourceKey] = [.volumeNameKey]
-        let removableState = Store.shared.bool(key: "Disk_removable", defaultValue: false) 
-        let paths = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys)!
+        let removableState = Store.shared.bool(key: "Disk_removable", defaultValue: false)
+        let paths = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes])!
         
         guard let session = DASessionCreate(kCFAllocatorDefault) else {
             error("cannot create main DASessionCreate()", log: self.log)
@@ -43,6 +65,7 @@ internal class CapacityReader: Reader<Disks> {
                             
                             if let path = d.path {
                                 self.list.updateFreeSize(idx, newValue: self.freeDiskSpaceInBytes(path))
+                                self.list.updateSMARTData(idx, smart: self.getSMARTDetails(for: BSDName))
                             }
                             
                             continue
@@ -51,7 +74,10 @@ internal class CapacityReader: Reader<Disks> {
                         if var d = driveDetails(disk, removableState: removableState) {
                             if let path = d.path {
                                 d.free = self.freeDiskSpaceInBytes(path)
+                                d.size = self.totalDiskSpaceInBytes(path)
                             }
+                            d.smart = self.getSMARTDetails(for: BSDName)
+                            guard d.size != 0 else { continue }
                             self.list.append(d)
                             self.list.sort()
                         }
@@ -71,15 +97,6 @@ internal class CapacityReader: Reader<Disks> {
     
     private func freeDiskSpaceInBytes(_ path: URL) -> Int64 {
         do {
-            let systemAttributes = try FileManager.default.attributesOfFileSystem(forPath: path.path)
-            if let freeSpace = (systemAttributes[FileAttributeKey.systemFreeSize] as? NSNumber)?.int64Value {
-                return freeSpace
-            }
-        } catch let err {
-            error("error retrieving free space #2: \(err.localizedDescription)", log: self.log)
-        }
-        
-        do {
             if let url = URL(string: path.absoluteString) {
                 let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
                 if let capacity = values.volumeAvailableCapacityForImportantUsage, capacity != 0 {
@@ -90,19 +107,97 @@ internal class CapacityReader: Reader<Disks> {
             error("error retrieving free space #1: \(err.localizedDescription)", log: self.log)
         }
         
+        do {
+            let systemAttributes = try FileManager.default.attributesOfFileSystem(forPath: path.path)
+            if let freeSpace = (systemAttributes[FileAttributeKey.systemFreeSize] as? NSNumber)?.int64Value {
+                return freeSpace
+            }
+        } catch let err {
+            error("error retrieving free space: \(err.localizedDescription)", log: self.log)
+        }
+        
         return 0
+    }
+    
+    private func totalDiskSpaceInBytes(_ path: URL) -> Int64 {
+        do {
+            let systemAttributes = try FileManager.default.attributesOfFileSystem(forPath: path.path)
+            if let totalSpace = (systemAttributes[FileAttributeKey.systemSize] as? NSNumber)?.int64Value {
+                return totalSpace
+            }
+        } catch let err {
+            error("error retrieving total space: \(err.localizedDescription)", log: self.log)
+        }
+        
+        return 0
+    }
+    
+    private func getSMARTDetails(for BSDName: String) -> smart_t? {
+        guard self.SMART else { return nil }
+        
+        var disk = IOServiceGetMatchingService(kIOMasterPortDefault, IOBSDNameMatching(kIOMasterPortDefault, 0, BSDName.cString(using: .utf8)))
+        guard disk != kIOReturnSuccess else { return nil }
+        defer { IOObjectRelease(disk) }
+        
+        var parent = disk
+        while IOObjectConformsTo(disk, kIOBlockStorageDeviceClass) == 0 {
+            let error = IORegistryEntryGetParentEntry(disk, kIOServicePlane, &parent)
+            if error != kIOReturnSuccess || parent == kIOReturnSuccess { return nil }
+            disk = parent
+        }
+        
+        guard IOObjectConformsTo(disk, kIOBlockStorageDeviceClass) > 0,
+              let raw = IORegistryEntryCreateCFProperty(disk, "NVMe SMART Capable" as CFString, kCFAllocatorDefault, 0),
+              let val = raw.takeRetainedValue() as? Bool, val else {
+            return nil
+        }
+        
+        var pluginInterface: UnsafeMutablePointer<UnsafeMutablePointer<IOCFPlugInInterface>?>?
+        var smartInterface: UnsafeMutablePointer<UnsafeMutablePointer<IONVMeSMARTInterface>?>?
+        var score: Int32  = 0
+        
+        var result = IOCreatePlugInInterfaceForService(disk, kIONVMeSMARTUserClientTypeID, kIOCFPlugInInterfaceID, &pluginInterface, &score)
+        guard result == kIOReturnSuccess else { return nil }
+        defer {
+            if pluginInterface != nil {
+                IODestroyPlugInInterface(pluginInterface)
+            }
+        }
+        
+        result = withUnsafeMutablePointer(to: &smartInterface) {
+            $0.withMemoryRebound(to: Optional<LPVOID>.self, capacity: 1) {
+                pluginInterface?.pointee?.pointee.QueryInterface(pluginInterface, CFUUIDGetUUIDBytes(kIONVMeSMARTInterfaceID), $0) ?? KERN_NOT_FOUND
+            }
+        }
+        
+        guard result == kIOReturnSuccess else { return nil }
+        defer {
+            if smartInterface != nil {
+                _ = pluginInterface?.pointee?.pointee.Release(smartInterface)
+            }
+        }
+        
+        guard let smart = smartInterface?.pointee else { return nil }
+        var smartData: nvme_smart_log = nvme_smart_log()
+        guard smart.pointee.SMARTReadData(smartInterface, &smartData) == kIOReturnSuccess else { return nil }
+        
+        let temperatures: [UInt8] = [UInt8(smartData.temperature.1), UInt8(smartData.temperature.0)]
+        var temperature: UInt16 = 0
+        let data = NSData(bytes: temperatures, length: 2)
+        data.getBytes(&temperature, length: 2)
+        
+        return smart_t(
+            temperature: Int(UInt16(bigEndian: temperature) - 273),
+            life: 100 - Int(smartData.percent_used)
+        )
     }
 }
 
 internal class ActivityReader: Reader<Disks> {
     internal var list: Disks = Disks()
     
-    init() {
-        super.init()
-    }
-    
     override func setup() {
-        setInterval(1)
+        self.setInterval(1)
     }
     
     public override func read() {
@@ -192,6 +287,9 @@ private func driveDetails(_ disk: DADisk, removableState: Bool) -> drive? {
                 }
             }
             
+            if let mediaUUID = dict[kDADiskDescriptionMediaUUIDKey as String] {
+                d.uuid = CFUUIDCreateString(kCFAllocatorDefault, (mediaUUID as! CFUUID)) as String
+            }
             if let mediaName = dict[kDADiskDescriptionVolumeNameKey as String] {
                 d.mediaName = mediaName as! String
                 if d.mediaName == "Recovery" {
@@ -205,9 +303,6 @@ private func driveDetails(_ disk: DADisk, removableState: Bool) -> drive? {
                         return nil
                     }
                 }
-            }
-            if let mediaSize = dict[kDADiskDescriptionMediaSizeKey as String] {
-                d.size = Int64(truncating: mediaSize as! NSNumber)
             }
             if let deviceModel = dict[kDADiskDescriptionDeviceModelKey as String] {
                 d.model = (deviceModel as! String).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -239,6 +334,9 @@ private func driveDetails(_ disk: DADisk, removableState: Bool) -> drive? {
     if d.path == nil {
         return nil
     }
+    if d.uuid == "" || d.uuid == "00000000-0000-0000-0000-000000000000" {
+        d.uuid = d.BSDName
+    }
     
     let partitionLevel = d.BSDName.filter { "0"..."9" ~= $0 }.count
     if let parent = getDeviceIOParent(DADiskCopyIOMedia(disk), level: Int(partitionLevel)) {
@@ -256,12 +354,111 @@ public func getDeviceIOParent(_ obj: io_registry_entry_t, level: Int) -> io_regi
         return nil
     }
     
-    for _ in 1...level {
-        if IORegistryEntryGetParentEntry(parent, kIOServicePlane, &parent) != KERN_SUCCESS {
-            IOObjectRelease(parent)
-            return nil
-        }
+    for _ in 1...level where IORegistryEntryGetParentEntry(parent, kIOServicePlane, &parent) != KERN_SUCCESS {
+        IOObjectRelease(parent)
+        return nil
     }
     
     return parent
+}
+
+struct io {
+    var read: Int
+    var write: Int
+}
+
+public class ProcessReader: Reader<[Disk_process]> {
+    private let queue = DispatchQueue(label: "eu.exelban.Disk.processReader")
+    
+    private var _list: [Int32: io] = [:]
+    private var list: [Int32: io] {
+        get {
+            self.queue.sync { self._list }
+        }
+        set {
+            self.queue.sync { self._list = newValue }
+        }
+    }
+    
+    private var numberOfProcesses: Int {
+        Store.shared.int(key: "\(ModuleType.disk.stringValue)_processes", defaultValue: 5)
+    }
+    
+    public override func setup() {
+        self.popup = true
+        self.setInterval(1)
+    }
+    
+    public override func read() {
+        guard self.numberOfProcesses != 0, let output = runProcess(path: "/bin/ps", args: ["-Aceo pid,args", "-r"]) else { return }
+        
+        var processes: [Disk_process] = []
+        output.enumerateLines { (line, _) in
+            let str = line.trimmingCharacters(in: .whitespaces)
+            let pidFind = str.findAndCrop(pattern: "^\\d+")
+            guard let pid = Int32(pidFind.cropped) else { return }
+            let name = pidFind.remain.findAndCrop(pattern: "^[^ ]+").cropped
+            
+            var usage = rusage_info_current()
+            let result = withUnsafeMutablePointer(to: &usage) {
+                $0.withMemoryRebound(to: (rusage_info_t?.self), capacity: 1) {
+                    proc_pid_rusage(pid, RUSAGE_INFO_CURRENT, $0)
+                }
+            }
+            guard result != -1 else { return }
+            
+            let bytesRead = Int(usage.ri_diskio_bytesread)
+            let bytesWritten = Int(usage.ri_diskio_byteswritten)
+            
+            if self.list[pid] == nil {
+                self.list[pid] = io(read: bytesRead, write: bytesWritten)
+            }
+            
+            if let v = self.list[pid] {
+                let read = bytesRead - v.read
+                let write = bytesWritten - v.write
+                if read != 0 || write != 0 {
+                    processes.append(Disk_process(pid: Int(pid), name: name, read: read, write: write))
+                }
+            }
+            
+            self.list[pid]?.read = bytesRead
+            self.list[pid]?.write = bytesWritten
+        }
+        
+        processes.sort {
+            let firstMax = max($0.read, $0.write)
+            let secondMax = max($1.read, $1.write)
+            let firstMin = min($0.read, $0.write)
+            let secondMin = min($1.read, $1.write)
+            
+            if firstMax == secondMax && firstMin != secondMin { // max values are the same, min not. Sort by min values
+                return firstMin < secondMin
+            }
+            return firstMax < secondMax // max values are not the same, sort by max value
+        }
+        
+        self.callback(processes.suffix(self.numberOfProcesses).reversed())
+    }
+}
+
+private func runProcess(path: String, args: [String] = []) -> String? {
+    let task = Process()
+    task.launchPath = path
+    task.arguments = args
+    
+    let outputPipe = Pipe()
+    defer {
+        outputPipe.fileHandleForReading.closeFile()
+    }
+    task.standardOutput = outputPipe
+    
+    do {
+        try task.run()
+    } catch {
+        return nil
+    }
+    
+    let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+    return String(data: outputData, encoding: .utf8)
 }
